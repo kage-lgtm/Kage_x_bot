@@ -1,5 +1,7 @@
 import os
 import logging
+import asyncio
+from aiohttp import web
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from supabase import create_client, Client as SupabaseClient
@@ -79,7 +81,27 @@ async def start_command(client, message):
 
     await message.reply_text(welcome_text, reply_markup=keyboard)
 
-# Bot Run karne ka standard tareeka
-if __name__ == "__main__":
+# 🌐 Dummy Web Server to satisfy Render Web Service port binding
+async def handle(request):
+    return web.Response(text="Kage x Bot is active and running 24/7!")
+
+async def web_server():
+    web_app = web.Application()
+    web_app.add_routes([web.get("/", handle)])
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logging.info(f"Web server started on port {port}")
+
+# Main entry point to run both web server and bot
+async def main():
+    await web_server()
     print("🤖 Kage x Bot is starting...")
-    app.run()
+    await app.start()
+    print("🚀 Bot started successfully!")
+    await asyncio.gather(*(asyncio.Event().wait() for _ in range(1)))
+
+if __name__ == "__main__":
+    asyncio.run(main())
