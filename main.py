@@ -20,7 +20,7 @@ ADMINS = [5074717463, 6144546817]
 # Logging setup
 logging.basicConfig(level=logging.INFO)
 
-# 1️⃣ SABSE PEHELE CLIENT INITIALIZE KARO
+# 1️⃣ CLIENT INITIALIZE
 app = Client(
     "Kage_x_Bot",
     api_id=API_ID,
@@ -28,7 +28,7 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-# Supabase Database Client Initialize karo
+# Supabase Database Client Initialize
 supabase: SupabaseClient = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 @app.on_message(filters.command("start"))
@@ -44,6 +44,38 @@ async def start_command(client, message):
             "Access ke liye developer se contact karein: **@Kage_x_edit**"
         )
         return
+
+    # Check for Deep-linking (e.g. /start file_id)
+    if len(message.command) > 1:
+        file_code = message.command[1]
+        try:
+            # Database se file fetch karo
+            res = supabase.table("files").select("*").eq("file_code", file_code).execute()
+            if res.data:
+                file_data = res.data[0]
+                file_id = file_data["file_id"]
+                file_type = file_data["file_type"]
+                caption = file_data.get("caption", "")
+
+                # File type ke mutabiq send karo
+                if file_type == "video":
+                    await client.send_video(user_id, file_id, caption=caption)
+                elif file_type == "document":
+                    await client.send_document(user_id, file_id, caption=caption)
+                elif file_type == "audio":
+                    await client.send_audio(user_id, file_id, caption=caption)
+                elif file_type == "photo":
+                    await client.send_photo(user_id, file_id, caption=caption)
+                else:
+                    await client.send_cached_media(user_id, file_id, caption=caption)
+                return
+            else:
+                await message.reply_text("❌ File nahi mili ya link invalid ho chuka hai!")
+                return
+        except Exception as e:
+            logging.error(f"Deep link error: {e}")
+            await message.reply_text("⚠️ File fetch karne mein error aaya hai.")
+            return
 
     try:
         existing_user = supabase.table("users").select("user_id").eq("user_id", user_id).execute()
@@ -77,6 +109,66 @@ async def start_command(client, message):
     ])
 
     await message.reply_text(welcome_text, reply_markup=keyboard)
+
+
+# 📥 Restricted Content / Media Saver Handler
+@app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo))
+async def save_restricted_media(client, message):
+    user_id = message.from_user.id
+    if ADMINS and user_id not in ADMINS:
+        return
+
+    # Determine file type and file_id
+    file_id = None
+    file_type = "unknown"
+    if message.video:
+        file_id = message.video.file_id
+        file_type = "video"
+    elif message.document:
+        file_id = message.document.file_id
+        file_type = "document"
+    elif message.audio:
+        file_id = message.audio.file_id
+        file_type = "audio"
+    elif message.photo:
+        file_id = message.photo[-1].file_id
+        file_type = "photo"
+
+    if not file_id:
+        return
+
+    caption = message.caption or ""
+    import random
+    import string
+    # Unique short code generate karo
+    file_code = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+
+    try:
+        # Supabase mein store karo (Make sure 'files' table exist karti ho supabase mein)
+        supabase.table("files").insert({
+            "file_code": file_code,
+            "file_id": file_id,
+            "file_type": file_type,
+            "caption": caption,
+            "user_id": user_id
+        }).execute()
+
+        bot_info = await client.get_me()
+        bot_username = bot_info.username
+        share_link = f"https://t.me/{bot_username}?start={file_code}"
+
+        await message.reply_text(
+            f"✅ **File Successfully Saved!**\n\n"
+            f"🔗 **Sharable Link:**\n`{share_link}`\n\n"
+            f"Is link ko copy karke apne channel par bhej sakte hain. Jab koi is par click karega, bot seedha video bhej dega!",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔗 Open Link", url=share_link)]
+            ])
+        )
+    except Exception as e:
+        logging.error(f"Error saving file to DB: {e}")
+        await message.reply_text("❌ File save karne mein database error aaya hai. Table schema check karein.")
+
 
 # 🔘 Inline Buttons Callback Handler
 @app.on_callback_query()
