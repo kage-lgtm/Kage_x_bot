@@ -1,7 +1,7 @@
 import os
 import logging
-import asyncio
-from aiohttp import web
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from supabase import create_client, Client as SupabaseClient
@@ -81,27 +81,28 @@ async def start_command(client, message):
 
     await message.reply_text(welcome_text, reply_markup=keyboard)
 
-# 🌐 Web Server Handler
-async def handle(request):
-    return web.Response(text="Kage x Bot is active and running 24/7!")
+# 🌐 Simple HTTP Server for Render Port Binding
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Kage x Bot is active and running 24/7!")
+    def log_message(self, format, *args):
+        return
 
-async def main():
-    # Aiohttp Web Server start karo Render ke liye
-    web_app = web.Application()
-    web_app.add_routes([web.get("/", handle)])
-    runner = web.AppRunner(web_app)
-    await runner.setup()
+def run_http_server():
     port = int(os.environ.get("PORT", 8080))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    logging.info(f"🌐 Web server started on port {port}")
-
-    # Pyrogram Bot start karo
-    await app.start()
-    logging.info("🤖 Kage x Bot started successfully!")
-
-    # Bot ko zinda rakhne ke liye infinite wait
-    await asyncio.Event().wait()
+    server = HTTPServer(("0.0.0.0", port), SimpleHandler)
+    logging.info(f"🌐 HTTP server started on port {port}")
+    server.serve_forever()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Background thread mein HTTP server start karo
+    server_thread = threading.Thread(target=run_http_server)
+    server_thread.daemon = True
+    server_thread.start()
+
+    # Pyrogram Bot ko main thread mein start karo
+    logging.info("🤖 Starting Kage x Bot...")
+    app.run()
