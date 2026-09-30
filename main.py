@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from supabase import create_client, Client as SupabaseClient
@@ -12,7 +13,7 @@ BOT_TOKEN = "8529227386:AAFsqpj5mq4N_fRq1MJ9_hwF-hir7bVGrxw"
 SUPABASE_URL = "https://zjfuvwvzjpwmytmvywib.supabase.co"
 SUPABASE_KEY = "sb_publishable_r8cPTMZLPK18QagNbIUz-w_uuOruHEQ"
 
-# 👑 ADMINS CONFIGURATION (Teri aur dost ki ID)
+# 👑 ADMINS CONFIGURATION
 ADMINS = [5074717463, 6144546817]
 
 # Logging setup
@@ -37,7 +38,7 @@ async def start_command(client, message):
     # 🔒 ACCESS CONTROL CHECK
     if ADMINS and user_id not in ADMINS:
         await message.reply_text(
-            "⚠️ **Access Denied!**\n\n"
+            "⚠️️ **Access Denied!**\n\n"
             "Yeh ek private bot hai. Aapke paas isko use karne ki permission nahi hai.\n"
             "Access ke liye developer se contact karein: **@Kage_x_edit**"
         )
@@ -79,7 +80,12 @@ async def start_command(client, message):
 
     await message.reply_text(welcome_text, reply_markup=keyboard)
 
-# Bot Run karne ke liye
-if __name__ == "__main__":
+# Bot Run karne ke liye fixed async main function
+async def main():
     print("🤖 Kage x Bot is starting...")
-    app.run()
+    await app.start()
+    print("🚀 Bot started successfully!")
+    await asyncio.gather(*(asyncio.Event().wait() for _ in range(1)))
+
+if __name__ == "__main__":
+    asyncio.run(main())
