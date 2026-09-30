@@ -1,0 +1,3 @@
+pyrogram
+supabase
+python-dotenv
