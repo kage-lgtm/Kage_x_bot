@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from aiohttp import web
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -80,25 +81,27 @@ async def start_command(client, message):
 
     await message.reply_text(welcome_text, reply_markup=keyboard)
 
-# 🌐 Simple Web Server Handler for Render Web Service
+# 🌐 Web Server Handler
 async def handle(request):
     return web.Response(text="Kage x Bot is active and running 24/7!")
 
-def run_web():
+async def main():
+    # Aiohttp Web Server start karo Render ke liye
     web_app = web.Application()
     web_app.add_routes([web.get("/", handle)])
+    runner = web.AppRunner(web_app)
+    await runner.setup()
     port = int(os.environ.get("PORT", 8080))
-    web.run_app(web_app, host="0.0.0.0", port=port)
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logging.info(f"🌐 Web server started on port {port}")
+
+    # Pyrogram Bot start karo
+    await app.start()
+    logging.info("🤖 Kage x Bot started successfully!")
+
+    # Bot ko zinda rakhne ke liye infinite wait
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    import threading
-    
-    # Web server ko background thread mein start karo taaki Render ka port bind ho jaye
-    server_thread = threading.Thread(target=run_web)
-    server_thread.daemon = True
-    server_thread.start()
-    print("🌐 Web server started in background thread.")
-
-    # Pyrogram Bot ko main thread mein run karo
-    print("🤖 Kage x Bot is starting...")
-    app.run()
+    asyncio.run(main())
