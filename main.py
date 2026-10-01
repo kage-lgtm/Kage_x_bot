@@ -260,3 +260,34 @@ if __name__ == "__main__":
 
     logging.info("🤖 Starting Kage x Bot...")
     app.run()
+
+@app.on_callback_query(filters.regex("save_restricted"))
+async def save_restricted_menu(client, callback_query):
+    await callback_query.message.edit_text(
+        "⚡ **Save Restricted Content**\n\n"
+        "Bhai, ab aapko jis bhi private channel ya restricted media का link (`t.me/c/...`) chahiye, wo yahan direct bhej do. Mera userbot usko turant fetch karke aapko bhej dega!",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]
+        ])
+    )
+
+@app.on_message(filters.text & filters.private & filters.regex(r"t\.me/c/"))
+async def fetch_restricted_media(client, message):
+    link = message.text.strip()
+    sent_msg = await message.reply("🔄 **Fetching restricted file... Please wait!**")
+    
+    try:
+        parts = link.split("/")
+        chat_id = int("-100" + parts[-2])
+        msg_id = int(parts[-1])
+        
+        fetched_msg = await app.get_messages(chat_id, msg_id)
+        
+        if fetched_msg:
+            await fetched_msg.copy(message.chat.id)
+            await sent_msg.delete()
+        else:
+            await sent_msg.edit("❌ File nahi mili ya link galat hai.")
+            
+    except Exception as e:
+        await sent_msg.edit(f"❌ Error aa gaya bhai: `{str(e)}`")
