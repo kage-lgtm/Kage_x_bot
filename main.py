@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+import re
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 from pyrogram import Client, filters
@@ -107,7 +108,6 @@ async def back_to_menu(client, callback_query):
 async def receive_video(client, message):
     user_id = message.from_user.id
     
-    # Check if document is video format
     if message.document and not message.document.mime_type.startswith("video"):
         return
 
@@ -129,7 +129,7 @@ async def receive_video(client, message):
         reply_markup=quality_keyboard
     )
 
-# Process Compression based on selected quality
+# Process Compression with Live Percentage Progress Bar
 @app.on_callback_query(filters.regex(r"^comp_"))
 async def process_compression(client, callback_query):
     user_id = callback_query.from_user.id
@@ -141,17 +141,17 @@ async def process_compression(client, callback_query):
     resolution = "480" if "480p" in data else ("540" if "540p" in data else "720")
     
     msg = USER_VIDEOS[user_id]
+    duration = getattr(msg.video, "duration", 0) if msg.video else 0
+    
     status_msg = await callback_query.message.edit_text(f"🔄 **Downloading video for compression ({resolution}p)...**")
     
     input_file = f"input_{user_id}.mp4"
     output_file = f"output_{user_id}.mp4"
     
     try:
-        # Download video
         downloaded_path = await msg.download(file_name=input_file)
-        await status_msg.edit(f"🗜️ **Compressing video to {resolution}p using FFmpeg... Please wait!**")
+        await status_msg.edit(f"🗜️ **Starting compression to {resolution}p...**")
         
-        # FFmpeg scale arguments based on resolution
         if resolution == "480":
             scale_filter = "scale=-2:480"
         elif resolution == "540":
@@ -159,7 +159,6 @@ async def process_compression(client, callback_query):
         else:
             scale_filter = "scale=-2:720"
             
-        # Run FFmpeg compression command
         command = [
             "ffmpeg", "-i", downloaded_path,
             "-vf", scale_filter,
@@ -173,7 +172,39 @@ async def process_compression(client, callback_query):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        await process.communicate()
+        
+        last_percent = -1
+        
+        # Read FFmpeg stderr to parse progress live
+        while True:
+            line = await process.stderr.readline()
+            if not line:
+                break
+            line_str = line.decode('utf-8', errors='ignore')
+            
+            # Extract time from ffmpeg output (e.g., time=00:01:23.45)
+            time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2}\.\d{2})", line_str)
+            if time_match and duration > 0:
+                hrs, mins, secs = map(float, time_match.groups())
+                current_seconds = hrs * 3600 + mins * 60 + secs
+                percent = int((current_seconds / duration) * 100)
+                percent = max(0, min(100, percent))
+                
+                # Update message only when percentage increases by at least 10% to avoid flood limits
+                if percent >= last_percent + 10:
+                    last_percent = percent
+                    filled_blocks = int(percent / 10)
+                    bar = "█" * filled_blocks + "░" * (10 - filled_blocks)
+                    try:
+                        await status_msg.edit(
+                            f"🗜️ **Compressing to {resolution}p...**\n\n"
+                            f"[{bar}] **{percent}%**\n"
+                            f"⏳ Please wait while video is being processed."
+                        )
+                    except Exception:
+                        pass
+
+        await process.wait()
         
         if os.path.exists(output_file):
             await status_msg.edit("📤 **Uploading compressed video...**")
@@ -190,7 +221,6 @@ async def process_compression(client, callback_query):
         await status_msg.edit(f"❌ Error: `{str(e)}`")
         
     finally:
-        # Cleanup temporary files
         if os.path.exists(input_file):
             os.remove(input_file)
         if os.path.exists(output_file):
