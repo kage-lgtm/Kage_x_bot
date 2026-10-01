@@ -75,15 +75,19 @@ async def start_command(client, message):
     ])
 
     await message.reply_text(
-        f"👋 **Hello {username}!**\n\nWelcome to **Kage x Bot** 🚀\n\nNeeche diye gaye buttons se features explore karein, ya koi bhi restricted link yahan bhej do save karne ke liye!",
+        f"👋 **Hello {username}!**\n\n"
+        f"Welcome to **Kage x Bot** 🚀\n"
+        f"👑 **Developer:** @kage_x_edit\n\n"
+        f"Neeche diye gaye buttons se features explore karein, ya koi bhi restricted link yahan bhej do save karne ke liye!",
         reply_markup=menu_keyboard
     )
 
 @app.on_callback_query(filters.regex("compress_menu"))
 async def compress_menu(client, callback_query):
     await callback_query.message.edit_text(
-        "🗜️ **Video Compressor Studio**\n\n"
-        "Bhai, apni video yahan direct bhej do. Uske baad main tujhe quality options dunga ki kitni quality tak compress karna hai!",
+        "🗜️ **Video Compressor Studio**\n"
+        "👑 **Developer:** @kage_x_edit\n\n"
+        "Bhai, apni video yahan direct bhej do. Uske baad main tujhe quality options dunga ki kis resolution mein compress karna hai!",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]
         ])
@@ -105,14 +109,15 @@ async def back_to_menu(client, callback_query):
         ]
     ])
     await callback_query.message.edit_text(
-        "👋 **Main Menu**\n\nNeeche diye gaye buttons se features explore karein:",
+        "👋 **Main Menu**\n"
+        "👑 **Developer:** @kage_x_edit\n\n"
+        "Neeche diye gaye buttons se features explore karein:",
         reply_markup=menu_keyboard
     )
 
 # 📥 SAVE RESTRICTED CONTENT HANDLER (WITH LIVE DOWNLOAD PERCENTAGE & 16:9 FIX)
 @app.on_message(filters.regex(r"https?://t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)") & filters.private)
 async def restricted_link_handler(client, message):
-    user_id = message.from_user.id
     link = message.text.strip()
     
     match = re.search(r"t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)", link)
@@ -155,7 +160,6 @@ async def restricted_link_handler(client, message):
             return
             
         if target_msg.media:
-            # Download with live progress bar
             file_path = await target_msg.download(progress=progress_callback)
             
             await progress_msg.edit("📤 **Uploading file to you...**")
@@ -196,7 +200,7 @@ async def restricted_link_handler(client, message):
     except Exception as e:
         await progress_msg.edit(f"❌ Error aagaya bhai: `{str(e)}`\n\nMake sure userbot is joined or added to that channel/group!")
 
-# Handle incoming videos for compression
+# 🗜️ HANDLE INCOMING VIDEOS FOR COMPRESSION OPTIONS
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video(client, message):
     user_id = message.from_user.id
@@ -209,23 +213,23 @@ async def receive_video(client, message):
 
     USER_VIDEOS[user_id] = message
     
-    quality_keyboard = InlineKeyboardMarkup([
+    resolution_keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📱 480p (Fast & Light)", callback_data="comp_480p"),
-            InlineKeyboardButton("💻 540p (Standard)", callback_data="comp_540p")
+            InlineKeyboardButton("📱 480P", callback_data="comp_480p"),
+            InlineKeyboardButton("💻 540P", callback_data="comp_540p")
         ],
         [
-            InlineKeyboardButton("🎬 720p (HD Quality)", callback_data="comp_720p"),
+            InlineKeyboardButton("🎬 720P (Original)", callback_data="comp_720p"),
             InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")
         ]
     ])
     
     await message.reply_text(
-        "🎬 **Video mil gayi bhai!**\n\nNeeche se select karo ki isko kis quality mein compress karna hai:",
-        reply_markup=quality_keyboard
+        "🎬 **Video mil gayi bhai!**\n\nSelect resolution to compress:",
+        reply_markup=resolution_keyboard
     )
 
-# Process Compression with Live Percentage Progress Bar
+# 🔄 PROCESS COMPRESSION WITH LIVE PROGRESS BAR & 16:9 SUPPORT
 @app.on_callback_query(filters.regex(r"^comp_"))
 async def process_compression(client, callback_query):
     user_id = callback_query.from_user.id
@@ -239,14 +243,14 @@ async def process_compression(client, callback_query):
     msg = USER_VIDEOS[user_id]
     duration = getattr(msg.video, "duration", 0) if msg.video else 0
     
-    status_msg = await callback_query.message.edit_text(f"🔄 **Downloading video for compression ({resolution}p)...**")
+    status_msg = await callback_query.message.edit_text(f"🔄 **Downloading video for compression ({resolution}P)...**")
     
     input_file = f"input_{user_id}.mp4"
     output_file = f"output_{user_id}.mp4"
     
     try:
         downloaded_path = await msg.download(file_name=input_file)
-        await status_msg.edit(f"🗜️ **Starting compression to {resolution}p...**")
+        await status_msg.edit(f"🗜️ **Compressing video to {resolution}P...**")
         
         if resolution == "480":
             scale_filter = "scale=-2:480"
@@ -290,9 +294,8 @@ async def process_compression(client, callback_query):
                     bar = "█" * filled_blocks + "░" * (10 - filled_blocks)
                     try:
                         await status_msg.edit(
-                            f"🗜️ **Compressing to {resolution}p...**\n\n"
-                            f"[{bar}] **{percent}%**\n"
-                            f"⏳ Please wait while video is being processed."
+                            f"🗜️ **Compressing to {resolution}P...**\n\n"
+                            f"[{bar}] **{percent}%**"
                         )
                     except Exception:
                         pass
@@ -301,12 +304,23 @@ async def process_compression(client, callback_query):
         
         if os.path.exists(output_file):
             await status_msg.edit("📤 **Uploading compressed video...**")
+            
+            # Thumbnail preserve karne ki koshish agar original video mein thi
+            thumb_path = None
+            if msg.video and msg.video.thumbs:
+                thumb_path = await client.download_media(msg.video.thumbs[0].file_id)
+            
             await client.send_video(
                 chat_id=callback_query.message.chat.id,
                 video=output_file,
-                supports_streaming=True,
-                caption=f"✅ **Compressed successfully to {resolution}p!**\n👑 By Kage x Bot"
+                thumb=thumb_path,
+                supports_streaming=True, # 16:9 Widescreen aspect ratio fix
+                caption=f"✅ **Compressed successfully to {resolution}P!**\n👑 **Developer:** @kage_x_edit"
             )
+            
+            if thumb_path and os.path.exists(thumb_path):
+                os.remove(thumb_path)
+                
             await status_msg.delete()
         else:
             await status_msg.edit("❌ Compression fail ho gaya bhai!")
