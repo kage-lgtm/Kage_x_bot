@@ -7,6 +7,7 @@ import threading
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from supabase import create_client, Client as SupabaseClient
+import imageio_ffmpeg
 
 # Credentials & Supabase Config
 API_ID = int(os.environ.get("API_ID", 38215355))
@@ -22,6 +23,9 @@ ADMINS = [5074717463, 6144546817]
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
+
+# Get internal FFmpeg executable path automatically
+FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 
 # 1️⃣ BOT CLIENT INITIALIZE
 app = Client(
@@ -160,7 +164,7 @@ async def process_compression(client, callback_query):
             scale_filter = "scale=-2:720"
             
         command = [
-            "ffmpeg", "-i", downloaded_path,
+            FFMPEG_PATH, "-i", downloaded_path,
             "-vf", scale_filter,
             "-c:v", "libx264", "-crf", "28",
             "-c:a", "aac", "-b:a", "128k",
@@ -182,7 +186,6 @@ async def process_compression(client, callback_query):
                 break
             line_str = line.decode('utf-8', errors='ignore')
             
-            # Extract time from ffmpeg output (e.g., time=00:01:23.45)
             time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2}\.\d{2})", line_str)
             if time_match and duration > 0:
                 hrs, mins, secs = map(float, time_match.groups())
@@ -190,7 +193,6 @@ async def process_compression(client, callback_query):
                 percent = int((current_seconds / duration) * 100)
                 percent = max(0, min(100, percent))
                 
-                # Update message only when percentage increases by at least 10% to avoid flood limits
                 if percent >= last_percent + 10:
                     last_percent = percent
                     filled_blocks = int(percent / 10)
