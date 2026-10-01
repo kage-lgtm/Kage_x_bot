@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 from pyrogram import Client, filters
@@ -40,6 +41,9 @@ userbot = Client(
 # Supabase Database Client Initialize
 supabase: SupabaseClient = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# Temporary storage for video compression sessions
+USER_VIDEOS = {}
+
 @app.on_message(filters.command("start"))
 async def start_command(client, message):
     user_id = message.from_user.id
@@ -55,7 +59,7 @@ async def start_command(client, message):
             InlineKeyboardButton("📥 Downloader", callback_data="downloader")
         ],
         [
-            InlineKeyboardButton("⚡ Save Restricted", callback_data="save_restricted")
+            InlineKeyboardButton("🗜️ Video Compressor", callback_data="compress_menu")
         ],
         [
             InlineKeyboardButton("💎 Premium & Coins", callback_data="premium"),
@@ -68,11 +72,11 @@ async def start_command(client, message):
         reply_markup=menu_keyboard
     )
 
-@app.on_callback_query(filters.regex("save_restricted"))
-async def save_restricted_menu(client, callback_query):
+@app.on_callback_query(filters.regex("compress_menu"))
+async def compress_menu(client, callback_query):
     await callback_query.message.edit_text(
-        "⚡ **Save Restricted Content**\n\n"
-        "Bhai, ab aapko jis bhi private channel ya restricted media ka link (`t.me/c/...`) chahiye, wo yahan direct bhej do. Mera userbot usko turant fetch karke aapko bhej dega!",
+        "🗜️ **Video Compressor Studio**\n\n"
+        "Bhai, apni video yahan direct bhej do. Uske baad main tujhe quality options dunga ki kitni quality tak compress karna hai!",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]
         ])
@@ -86,7 +90,7 @@ async def back_to_menu(client, callback_query):
             InlineKeyboardButton("📥 Downloader", callback_data="downloader")
         ],
         [
-            InlineKeyboardButton("⚡ Save Restricted", callback_data="save_restricted")
+            InlineKeyboardButton("🗜️ Video Compressor", callback_data="compress_menu")
         ],
         [
             InlineKeyboardButton("💎 Premium & Coins", callback_data="premium"),
@@ -98,57 +102,101 @@ async def back_to_menu(client, callback_query):
         reply_markup=menu_keyboard
     )
 
-# 🔗 Command to force userbot to join channel using invite link: /join <invite_link>
-@app.on_message(filters.command("join") & filters.private)
-async def join_channel_cmd(client, message):
-    if ADMINS and message.from_user.id not in ADMINS:
-        return
+# Handle incoming videos for compression
+@app.on_message((filters.video | filters.document) & filters.private)
+async def receive_video(client, message):
+    user_id = message.from_user.id
     
-    args = message.text.split(" ")
-    if len(args) < 2:
-        await message.reply("⚠️ **Kripya invite link dein!**\nUsage: `/join https://t.me/+abcdef...`")
+    # Check if document is video format
+    if message.document and not message.document.mime_type.startswith("video"):
         return
-        
-    invite_link = args[1]
-    sent = await message.reply("🔄 Joining channel via userbot...")
-    
-    try:
-        await userbot.join_chat(invite_link)
-        await sent.edit("✅ **Userbot successfully joined the channel!** Ab aap media link bhej sakte hain.")
-    except Exception as e:
-        await sent.edit(f"❌ Error: `{str(e)}`")
 
-# Restricted Media Link Handler
-@app.on_message(filters.text & filters.private & filters.regex(r"t\.me/c/"))
-async def fetch_restricted_media(client, message):
-    link = message.text.strip()
-    sent_msg = await message.reply("🔄 **Fetching restricted file... Please wait!**")
+    USER_VIDEOS[user_id] = message
+    
+    quality_keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📱 480p (Fast & Light)", callback_data="comp_480p"),
+            InlineKeyboardButton("💻 540p (Standard)", callback_data="comp_540p")
+        ],
+        [
+            InlineKeyboardButton("🎬 720p (HD Quality)", callback_data="comp_720p"),
+            InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")
+        ]
+    ])
+    
+    await message.reply_text(
+        "🎬 **Video mil gayi bhai!**\n\nNeeche se select karo ki isko kis quality mein compress karna hai:",
+        reply_markup=quality_keyboard
+    )
+
+# Process Compression based on selected quality
+@app.on_callback_query(filters.regex(r"^comp_"))
+async def process_compression(client, callback_query):
+    user_id = callback_query.from_user.id
+    if user_id not in USER_VIDEOS:
+        await callback_query.answer("⚠️ Koi video nahi mili! Dubara video bhejo.", show_alert=True)
+        return
+
+    data = callback_query.data
+    resolution = "480" if "480p" in data else ("540" if "540p" in data else "720")
+    
+    msg = USER_VIDEOS[user_id]
+    status_msg = await callback_query.message.edit_text(f"🔄 **Downloading video for compression ({resolution}p)...**")
+    
+    input_file = f"input_{user_id}.mp4"
+    output_file = f"output_{user_id}.mp4"
     
     try:
-        parts = link.split("/")
-        chat_id_raw = parts[-2]
-        chat_id = int("-100" + chat_id_raw)
-        msg_id = int(parts[-1])
+        # Download video
+        downloaded_path = await msg.download(file_name=input_file)
+        await status_msg.edit(f"🗜️ **Compressing video to {resolution}p using FFmpeg... Please wait!**")
         
-        try:
-            peer = await userbot.resolve_peer(chat_id)
-        except Exception:
-            await userbot.get_chat(chat_id)
-            peer = await userbot.resolve_peer(chat_id)
-            
-        fetched_msg = await userbot.get_messages(chat_id, msg_id)
-        
-        if fetched_msg and not fetched_msg.empty:
-            await fetched_msg.copy(message.chat.id)
-            await sent_msg.delete()
+        # FFmpeg scale arguments based on resolution
+        if resolution == "480":
+            scale_filter = "scale=-2:480"
+        elif resolution == "540":
+            scale_filter = "scale=960:540"
         else:
-            await sent_msg.edit("❌ File nahi mili ya message empty hai.")
+            scale_filter = "scale=-2:720"
+            
+        # Run FFmpeg compression command
+        command = [
+            "ffmpeg", "-i", downloaded_path,
+            "-vf", scale_filter,
+            "-c:v", "libx264", "-crf", "28",
+            "-c:a", "aac", "-b:a", "128k",
+            output_file, "-y"
+        ]
+        
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await process.communicate()
+        
+        if os.path.exists(output_file):
+            await status_msg.edit("📤 **Uploading compressed video...**")
+            await client.send_video(
+                chat_id=callback_query.message.chat.id,
+                video=output_file,
+                caption=f"✅ **Compressed successfully to {resolution}p!**\n👑 By Kage x Bot"
+            )
+            await status_msg.delete()
+        else:
+            await status_msg.edit("❌ Compression fail ho gaya bhai!")
             
     except Exception as e:
-        await sent_msg.edit(
-            f"❌ Error aa gaya bhai: `{str(e)}`\n\n"
-            f"👉 Agar yeh private channel hai, toh bot ko `/join <invite_link>` command se pehle join karwa le."
-        )
+        await status_msg.edit(f"❌ Error: `{str(e)}`")
+        
+    finally:
+        # Cleanup temporary files
+        if os.path.exists(input_file):
+            os.remove(input_file)
+        if os.path.exists(output_file):
+            os.remove(output_file)
+        if user_id in USER_VIDEOS:
+            del USER_VIDEOS[user_id]
 
 # Simple HTTP Server for Railway
 class SimpleHandler(BaseHTTPRequestHandler):
