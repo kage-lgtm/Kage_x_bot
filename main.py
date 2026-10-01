@@ -74,7 +74,7 @@ async def start_command(client, message):
     ])
 
     await message.reply_text(
-        f"👋 **Hello {username}!**\n\nWelcome to **Kage x Bot** 🚀\n\nNeeche diye gaye buttons se features explore karein:",
+        f"👋 **Hello {username}!**\n\nWelcome to **Kage x Bot** 🚀\n\nNeeche diye gaye buttons se features explore karein, ya koi bhi restricted link yahan bhej do save karne ke liye!",
         reply_markup=menu_keyboard
     )
 
@@ -108,12 +108,54 @@ async def back_to_menu(client, callback_query):
         reply_markup=menu_keyboard
     )
 
+# 📥 SAVE RESTRICTED CONTENT HANDLER
+@app.on_message(filters.regex(r"https?://t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)") & filters.private)
+async def restricted_link_handler(client, message):
+    user_id = message.from_user.id
+    link = message.text.strip()
+    
+    match = re.search(r"t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)", link)
+    if not match:
+        return
+        
+    chat_identifier = match.group(1)
+    msg_id = int(match.group(2))
+    
+    # Format chat_id properly for private vs public chats
+    if chat_identifier.isdigit():
+        chat_id = int("-100" + chat_identifier)
+    else:
+        chat_id = "@" + chat_identifier
+        
+    progress_msg = await message.reply_text("📥 **Fetching restricted content via userbot...**")
+    
+    try:
+        # Fetch message using userbot session
+        target_msg = await userbot.get_messages(chat_id, msg_id)
+        
+        if not target_msg or target_msg.empty:
+            await progress_msg.edit("❌ Ye message nahi mila ya delete ho gaya hai!")
+            return
+            
+        await progress_msg.edit("📤 **Uploading to your chat...**")
+        
+        # Copy message to user
+        await target_msg.copy(chat_id=message.chat.id)
+        await progress_msg.delete()
+        
+    except Exception as e:
+        await progress_msg.edit(f"❌ Error aagaya bhai: `{str(e)}`\n\nMake sure userbot is joined or added to that channel/group!")
+
 # Handle incoming videos for compression
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video(client, message):
     user_id = message.from_user.id
     
     if message.document and not message.document.mime_type.startswith("video"):
+        return
+
+    # Skip if message is a restricted link (handled above)
+    if message.text and "t.me/" in message.text:
         return
 
     USER_VIDEOS[user_id] = message
