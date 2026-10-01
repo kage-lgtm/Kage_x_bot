@@ -109,7 +109,7 @@ async def back_to_menu(client, callback_query):
         reply_markup=menu_keyboard
     )
 
-# Restricted Media Link Handler using USERBOT with Dialog Cache & Peer Fix
+# Restricted Media Link Handler using USERBOT (Fast Resolve Peer Fix)
 @app.on_message(filters.text & filters.private & filters.regex(r"t\.me/c/"))
 async def fetch_restricted_media(client, message):
     link = message.text.strip()
@@ -121,14 +121,14 @@ async def fetch_restricted_media(client, message):
         chat_id = int("-100" + chat_id_raw)
         msg_id = int(parts[-1])
         
-        # 🔑 FIX: Userbot dialogs fetch karke cache refresh karenge taaki peer invalid error na aaye
-        async for dialog in userbot.get_dialogs():
-            pass
+        # 🔑 FAST FIX: Direct peer resolve karo taaki atke na
+        try:
+            peer = await userbot.resolve_peer(chat_id)
+        except Exception:
+            await userbot.get_chat(chat_id)
+            peer = await userbot.resolve_peer(chat_id)
             
-        # Chat resolve karo
-        await userbot.get_chat(chat_id)
-        
-        # Message fetch karo
+        # Message fetch karo userbot ke zariye
         fetched_msg = await userbot.get_messages(chat_id, msg_id)
         
         if fetched_msg:
