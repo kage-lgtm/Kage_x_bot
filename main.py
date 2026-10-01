@@ -6,6 +6,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.errors import FloodWait
 from supabase import create_client, Client as SupabaseClient
 import imageio_ffmpeg
 
@@ -251,5 +252,17 @@ if __name__ == "__main__":
     server_thread.start()
 
     logging.info("🤖 Starting Kage x Userbot & Bot...")
-    userbot.start()
-    app.run()
+    
+    try:
+        userbot.start()
+    except FloodWait as e:
+        logging.warning(f"Userbot FloodWait: Need to wait {e.value} seconds.")
+    except Exception as e:
+        logging.warning(f"Userbot start error: {e}")
+
+    try:
+        app.run()
+    except FloodWait as e:
+        logging.error(f"Bot FloodWait: Telegram is asking to wait for {e.value} seconds.")
+    except Exception as e:
+        logging.error(f"Bot run error: {e}")
