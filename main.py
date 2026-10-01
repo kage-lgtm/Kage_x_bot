@@ -21,7 +21,7 @@ ADMINS = [5074717463, 6144546817]
 # Logging setup
 logging.basicConfig(level=logging.INFO)
 
-# 1️⃣ BOT CLIENT INITIALIZE (For commands and menus)
+# 1️⃣ BOT CLIENT INITIALIZE
 app = Client(
     "Kage_x_Bot",
     api_id=API_ID,
@@ -29,7 +29,7 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-# 2️⃣ USERBOT CLIENT INITIALIZE (For fetching restricted media)
+# 2️⃣ USERBOT CLIENT INITIALIZE
 userbot = Client(
     "Kage_Userbot",
     api_id=API_ID,
@@ -46,10 +46,7 @@ async def start_command(client, message):
     username = message.from_user.username or message.from_user.first_name
 
     if ADMINS and user_id not in ADMINS:
-        await message.reply_text(
-            "⚠️ **Access Denied!**\n\n"
-            "Yeh ek private bot hai. Aapke paas isko use karne ki permission nahi hai."
-        )
+        await message.reply_text("⚠️ **Access Denied!**")
         return
 
     menu_keyboard = InlineKeyboardMarkup([
@@ -67,15 +64,7 @@ async def start_command(client, message):
     ])
 
     await message.reply_text(
-        f"👋 **Hello {username}!**\n\n"
-        f"Welcome to **Kage x Bot** — Your ultimate all-in-one media and file management studio. 🚀\n\n"
-        f"👑 **Developer / Creator:** Kage (Kage x Edit)\n\n"
-        f"✨ **What I can do:**\n"
-        f"📁 File Store & Restricted Content Saving\n"
-        f"📥 Universal Media Downloader (YouTube, Insta, etc.)\n"
-        f"🌐 Subtitle & Translation Tools\n"
-        f"⚡ Fast & Free Processing!\n\n"
-        f"Neeche diye gaye buttons se features explore karein:",
+        f"👋 **Hello {username}!**\n\nWelcome to **Kage x Bot** 🚀\n\nNeeche diye gaye buttons se features explore karein:",
         reply_markup=menu_keyboard
     )
 
@@ -101,7 +90,7 @@ async def back_to_menu(client, callback_query):
         ],
         [
             InlineKeyboardButton("💎 Premium & Coins", callback_data="premium"),
-            InlineKeyboardButton("⚙️ Help & Support", callback_data="help")
+            InlineKeyboardButton("⚙️️ Help & Support", callback_data="help")
         ]
     ])
     await callback_query.message.edit_text(
@@ -109,7 +98,7 @@ async def back_to_menu(client, callback_query):
         reply_markup=menu_keyboard
     )
 
-# Restricted Media Link Handler using USERBOT (Fast Resolve Peer Fix)
+# Restricted Media Link Handler with Robust Chat Join & Fetch
 @app.on_message(filters.text & filters.private & filters.regex(r"t\.me/c/"))
 async def fetch_restricted_media(client, message):
     link = message.text.strip()
@@ -121,26 +110,30 @@ async def fetch_restricted_media(client, message):
         chat_id = int("-100" + chat_id_raw)
         msg_id = int(parts[-1])
         
-        # 🔑 FAST FIX: Direct peer resolve karo taaki atke na
+        # Try joining/accessing channel explicitly via userbot
         try:
-            peer = await userbot.resolve_peer(chat_id)
-        except Exception:
-            await userbot.get_chat(chat_id)
-            peer = await userbot.resolve_peer(chat_id)
+            chat = await userbot.get_chat(chat_id)
+        except Exception as err:
+            await sent_msg.edit(
+                f"❌ **Userbot Error:** Userbot is account is not in this channel or cannot access it!\n\n"
+                f"Reason: `{str(err)}`\n\n"
+                f"👉 **Fix:** Make sure the Telegram account whose Session String you used in Railway has joined this private channel (`{chat_id}`)."
+            )
+            return
             
-        # Message fetch karo userbot ke zariye
+        # Fetch message
         fetched_msg = await userbot.get_messages(chat_id, msg_id)
         
-        if fetched_msg:
+        if fetched_msg and not fetched_msg.empty:
             await fetched_msg.copy(message.chat.id)
             await sent_msg.delete()
         else:
-            await sent_msg.edit("❌ File nahi mili ya link galat hai.")
+            await sent_msg.edit("❌ File nahi mili ya message empty hai.")
             
     except Exception as e:
         await sent_msg.edit(f"❌ Error aa gaya bhai: `{str(e)}`")
 
-# Simple HTTP Server
+# Simple HTTP Server for Railway
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -161,5 +154,10 @@ if __name__ == "__main__":
     server_thread.start()
 
     logging.info("🤖 Starting Kage x Userbot & Bot...")
-    userbot.start()  # Userbot session start karega
+    userbot.start()
+    
+    # Print userbot info to verify correct account
+    me = userbot.get_me()
+    logging.info(f"✅ Userbot Logged in as: {me.first_name} (ID: {me.id})")
+    
     app.run()
