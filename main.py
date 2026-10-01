@@ -108,7 +108,7 @@ async def back_to_menu(client, callback_query):
         reply_markup=menu_keyboard
     )
 
-# 📥 SAVE RESTRICTED CONTENT HANDLER
+# 📥 SAVE RESTRICTED CONTENT HANDLER (WITH DOWNLOAD & UPLOAD BYPASS)
 @app.on_message(filters.regex(r"https?://t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)") & filters.private)
 async def restricted_link_handler(client, message):
     user_id = message.from_user.id
@@ -121,7 +121,6 @@ async def restricted_link_handler(client, message):
     chat_identifier = match.group(1)
     msg_id = int(match.group(2))
     
-    # Format chat_id properly for private vs public chats
     if chat_identifier.isdigit():
         chat_id = int("-100" + chat_identifier)
     else:
@@ -130,17 +129,31 @@ async def restricted_link_handler(client, message):
     progress_msg = await message.reply_text("📥 **Fetching restricted content via userbot...**")
     
     try:
-        # Fetch message using userbot session
         target_msg = await userbot.get_messages(chat_id, msg_id)
         
         if not target_msg or target_msg.empty:
             await progress_msg.edit("❌ Ye message nahi mila ya delete ho gaya hai!")
             return
             
-        await progress_msg.edit("📤 **Uploading to your chat...**")
-        
-        # Copy message to user
-        await target_msg.copy(chat_id=message.chat.id)
+        if target_msg.media:
+            await progress_msg.edit("📥 **Downloading restricted media...**")
+            file_path = await target_msg.download()
+            
+            await progress_msg.edit("📤 **Uploading file to you...**")
+            if target_msg.video:
+                await client.send_video(chat_id=message.chat.id, video=file_path, caption=target_msg.caption or "")
+            elif target_msg.document:
+                await client.send_document(chat_id=message.chat.id, document=file_path, caption=target_msg.caption or "")
+            elif target_msg.photo:
+                await client.send_photo(chat_id=message.chat.id, photo=file_path, caption=target_msg.caption or "")
+            elif target_msg.audio:
+                await client.send_audio(chat_id=message.chat.id, audio=file_path, caption=target_msg.caption or "")
+            
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        else:
+            await client.send_message(chat_id=message.chat.id, text=target_msg.text or "")
+            
         await progress_msg.delete()
         
     except Exception as e:
@@ -154,7 +167,6 @@ async def receive_video(client, message):
     if message.document and not message.document.mime_type.startswith("video"):
         return
 
-    # Skip if message is a restricted link (handled above)
     if message.text and "t.me/" in message.text:
         return
 
@@ -181,7 +193,7 @@ async def receive_video(client, message):
 async def process_compression(client, callback_query):
     user_id = callback_query.from_user.id
     if user_id not in USER_VIDEOS:
-        await callback_query.answer("⚠️ Koi video nahi mili! Dubara video bhejo.", show_alert=True)
+        await callback_query.answer("⚠️️ Koi video nahi mili! Dubara video bhejo.", show_alert=True)
         return
 
     data = callback_query.data
@@ -222,7 +234,6 @@ async def process_compression(client, callback_query):
         
         last_percent = -1
         
-        # Read FFmpeg stderr to parse progress live
         while True:
             line = await process.stderr.readline()
             if not line:
