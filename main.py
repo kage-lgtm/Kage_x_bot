@@ -109,7 +109,7 @@ async def back_to_menu(client, callback_query):
         reply_markup=menu_keyboard
     )
 
-# Restricted Media Link Handler using USERBOT
+# Restricted Media Link Handler using USERBOT with Peer Fix
 @app.on_message(filters.text & filters.private & filters.regex(r"t\.me/c/"))
 async def fetch_restricted_media(client, message):
     link = message.text.strip()
@@ -117,10 +117,14 @@ async def fetch_restricted_media(client, message):
     
     try:
         parts = link.split("/")
-        chat_id = int("-100" + parts[-2])
+        chat_id_raw = parts[-2]
+        chat_id = int("-100" + chat_id_raw)
         msg_id = int(parts[-1])
         
-        # Userbot ke zariye message fetch karna kyunki ye private channel access kar sakta hai
+        # 🔑 FIX: Pehle chat/peer ko resolve karo taaki Peer id invalid ka error na aaye
+        await userbot.get_chat(chat_id)
+        
+        # Ab message fetch karo
         fetched_msg = await userbot.get_messages(chat_id, msg_id)
         
         if fetched_msg:
