@@ -90,7 +90,7 @@ async def back_to_menu(client, callback_query):
         ],
         [
             InlineKeyboardButton("💎 Premium & Coins", callback_data="premium"),
-            InlineKeyboardButton("⚙️️ Help & Support", callback_data="help")
+            InlineKeyboardButton("⚙️ Help & Support", callback_data="help")
         ]
     ])
     await callback_query.message.edit_text(
@@ -98,7 +98,27 @@ async def back_to_menu(client, callback_query):
         reply_markup=menu_keyboard
     )
 
-# Restricted Media Link Handler with Robust Chat Join & Fetch
+# 🔗 Command to force userbot to join channel using invite link: /join <invite_link>
+@app.on_message(filters.command("join") & filters.private)
+async def join_channel_cmd(client, message):
+    if ADMINS and message.from_user.id not in ADMINS:
+        return
+    
+    args = message.text.split(" ")
+    if len(args) < 2:
+        await message.reply("⚠️ **Kripya invite link dein!**\nUsage: `/join https://t.me/+abcdef...`")
+        return
+        
+    invite_link = args[1]
+    sent = await message.reply("🔄 Joining channel via userbot...")
+    
+    try:
+        await userbot.join_chat(invite_link)
+        await sent.edit("✅ **Userbot successfully joined the channel!** Ab aap media link bhej sakte hain.")
+    except Exception as e:
+        await sent.edit(f"❌ Error: `{str(e)}`")
+
+# Restricted Media Link Handler
 @app.on_message(filters.text & filters.private & filters.regex(r"t\.me/c/"))
 async def fetch_restricted_media(client, message):
     link = message.text.strip()
@@ -110,18 +130,12 @@ async def fetch_restricted_media(client, message):
         chat_id = int("-100" + chat_id_raw)
         msg_id = int(parts[-1])
         
-        # Try joining/accessing channel explicitly via userbot
         try:
-            chat = await userbot.get_chat(chat_id)
-        except Exception as err:
-            await sent_msg.edit(
-                f"❌ **Userbot Error:** Userbot is account is not in this channel or cannot access it!\n\n"
-                f"Reason: `{str(err)}`\n\n"
-                f"👉 **Fix:** Make sure the Telegram account whose Session String you used in Railway has joined this private channel (`{chat_id}`)."
-            )
-            return
+            peer = await userbot.resolve_peer(chat_id)
+        except Exception:
+            await userbot.get_chat(chat_id)
+            peer = await userbot.resolve_peer(chat_id)
             
-        # Fetch message
         fetched_msg = await userbot.get_messages(chat_id, msg_id)
         
         if fetched_msg and not fetched_msg.empty:
@@ -131,7 +145,10 @@ async def fetch_restricted_media(client, message):
             await sent_msg.edit("❌ File nahi mili ya message empty hai.")
             
     except Exception as e:
-        await sent_msg.edit(f"❌ Error aa gaya bhai: `{str(e)}`")
+        await sent_msg.edit(
+            f"❌ Error aa gaya bhai: `{str(e)}`\n\n"
+            f"👉 Agar yeh private channel hai, toh bot ko `/join <invite_link>` command se pehle join karwa le."
+        )
 
 # Simple HTTP Server for Railway
 class SimpleHandler(BaseHTTPRequestHandler):
@@ -155,9 +172,4 @@ if __name__ == "__main__":
 
     logging.info("🤖 Starting Kage x Userbot & Bot...")
     userbot.start()
-    
-    # Print userbot info to verify correct account
-    me = userbot.get_me()
-    logging.info(f"✅ Userbot Logged in as: {me.first_name} (ID: {me.id})")
-    
     app.run()
