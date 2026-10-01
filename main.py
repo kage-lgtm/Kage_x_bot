@@ -109,7 +109,7 @@ async def back_to_menu(client, callback_query):
         reply_markup=menu_keyboard
     )
 
-# 📥 SAVE RESTRICTED CONTENT HANDLER (WITH LIVE DOWNLOAD PERCENTAGE)
+# 📥 SAVE RESTRICTED CONTENT HANDLER (WITH LIVE DOWNLOAD PERCENTAGE & 16:9 FIX)
 @app.on_message(filters.regex(r"https?://t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)") & filters.private)
 async def restricted_link_handler(client, message):
     user_id = message.from_user.id
@@ -159,8 +159,26 @@ async def restricted_link_handler(client, message):
             file_path = await target_msg.download(progress=progress_callback)
             
             await progress_msg.edit("📤 **Uploading file to you...**")
+            
             if target_msg.video:
-                await client.send_video(chat_id=message.chat.id, video=file_path, caption=target_msg.caption or "")
+                thumb_path = None
+                if target_msg.video.thumbs:
+                    thumb_path = await userbot.download_media(target_msg.video.thumbs[0].file_id)
+                
+                await client.send_video(
+                    chat_id=message.chat.id,
+                    video=file_path,
+                    thumb=thumb_path,
+                    duration=target_msg.video.duration,
+                    width=target_msg.video.width,
+                    height=target_msg.video.height,
+                    supports_streaming=True, # 16:9 Widescreen aspect ratio fix
+                    caption=target_msg.caption or ""
+                )
+                
+                if thumb_path and os.path.exists(thumb_path):
+                    os.remove(thumb_path)
+                    
             elif target_msg.document:
                 await client.send_document(chat_id=message.chat.id, document=file_path, caption=target_msg.caption or "")
             elif target_msg.photo:
@@ -286,6 +304,7 @@ async def process_compression(client, callback_query):
             await client.send_video(
                 chat_id=callback_query.message.chat.id,
                 video=output_file,
+                supports_streaming=True,
                 caption=f"✅ **Compressed successfully to {resolution}p!**\n👑 By Kage x Bot"
             )
             await status_msg.delete()
