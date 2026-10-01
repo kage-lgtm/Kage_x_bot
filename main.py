@@ -2,6 +2,7 @@ import os
 import logging
 import asyncio
 import re
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 from pyrogram import Client, filters
@@ -108,7 +109,7 @@ async def back_to_menu(client, callback_query):
         reply_markup=menu_keyboard
     )
 
-# 📥 SAVE RESTRICTED CONTENT HANDLER (WITH DOWNLOAD & UPLOAD BYPASS)
+# 📥 SAVE RESTRICTED CONTENT HANDLER (WITH LIVE DOWNLOAD PERCENTAGE)
 @app.on_message(filters.regex(r"https?://t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)") & filters.private)
 async def restricted_link_handler(client, message):
     user_id = message.from_user.id
@@ -126,8 +127,26 @@ async def restricted_link_handler(client, message):
     else:
         chat_id = "@" + chat_identifier
         
-    progress_msg = await message.reply_text("📥 **Fetching restricted content via userbot...**")
+    progress_msg = await message.reply_text("📥 **Fetching restricted content...**")
     
+    last_update_time = [0]
+    async def progress_callback(current, total):
+        now = time.time()
+        if total > 0 and (now - last_update_time[0] > 3 or current == total):
+            last_update_time[0] = now
+            percent = int(current * 100 / total)
+            percent = max(0, min(100, percent))
+            filled_blocks = int(percent / 10)
+            bar = "█" * filled_blocks + "░" * (10 - filled_blocks)
+            try:
+                await progress_msg.edit(
+                    f"📥 **Downloading restricted media...**\n\n"
+                    f"[{bar}] **{percent}%**\n"
+                    f"📊 `{current / (1024*1024):.2f} MB` / `{total / (1024*1024):.2f} MB`"
+                )
+            except Exception:
+                pass
+
     try:
         target_msg = await userbot.get_messages(chat_id, msg_id)
         
@@ -136,8 +155,8 @@ async def restricted_link_handler(client, message):
             return
             
         if target_msg.media:
-            await progress_msg.edit("📥 **Downloading restricted media...**")
-            file_path = await target_msg.download()
+            # Download with live progress bar
+            file_path = await target_msg.download(progress=progress_callback)
             
             await progress_msg.edit("📤 **Uploading file to you...**")
             if target_msg.video:
@@ -193,7 +212,7 @@ async def receive_video(client, message):
 async def process_compression(client, callback_query):
     user_id = callback_query.from_user.id
     if user_id not in USER_VIDEOS:
-        await callback_query.answer("⚠️️ Koi video nahi mili! Dubara video bhejo.", show_alert=True)
+        await callback_query.answer("⚠ Koi video nahi mili! Dubara video bhejo.", show_alert=True)
         return
 
     data = callback_query.data
