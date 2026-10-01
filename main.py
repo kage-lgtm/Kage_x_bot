@@ -101,7 +101,7 @@ async def back_to_menu(client, callback_query):
             InlineKeyboardButton("📥 Downloader", callback_data="downloader")
         ],
         [
-            InlineKeyboardButton("🗜️ Video Compressor", callback_data="compress_menu")
+            InlineKeyboardButton("🗜️️ Video Compressor", callback_data="compress_menu")
         ],
         [
             InlineKeyboardButton("💎 Premium & Coins", callback_data="premium"),
@@ -305,6 +305,18 @@ async def process_compression(client, callback_query):
         if os.path.exists(output_file):
             await status_msg.edit("📤 **Uploading compressed video...**")
             
+            # Size calculation for percentage reduction
+            original_size = os.path.getsize(downloaded_path)
+            compressed_size = os.path.getsize(output_file)
+            
+            orig_mb = original_size / (1024 * 1024)
+            comp_mb = compressed_size / (1024 * 1024)
+            
+            if original_size > 0:
+                saved_percent = int((1 - (compressed_size / original_size)) * 100)
+            else:
+                saved_percent = 0
+            
             # Thumbnail preserve karne ki koshish agar original video mein thi
             thumb_path = None
             if msg.video and msg.video.thumbs:
@@ -315,7 +327,12 @@ async def process_compression(client, callback_query):
                 video=output_file,
                 thumb=thumb_path,
                 supports_streaming=True, # 16:9 Widescreen aspect ratio fix
-                caption=f"✅ **Compressed successfully to {resolution}P!**\n👑 **Developer:** @kage_x_edit"
+                caption=(
+                    f"✅ **Compressed successfully to {resolution}P!**\n\n"
+                    f"📉 **Size Reduced:** `{saved_percent}%`\n"
+                    f"📊 **Original:** `{orig_mb:.2f} MB` ➔ **Compressed:** `{comp_mb:.2f} MB`\n\n"
+                    f"👑 **Developer:** @kage_x_edit"
+                )
             )
             
             if thumb_path and os.path.exists(thumb_path):
