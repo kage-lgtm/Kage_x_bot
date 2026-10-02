@@ -101,7 +101,7 @@ async def back_to_menu(client, callback_query):
             InlineKeyboardButton("📥 Downloader", callback_data="downloader")
         ],
         [
-            InlineKeyboardButton("🗜️️ Video Compressor", callback_data="compress_menu")
+            InlineKeyboardButton("🗜️ Video Compressor", callback_data="compress_menu")
         ],
         [
             InlineKeyboardButton("💎 Premium & Coins", callback_data="premium"),
@@ -229,7 +229,7 @@ async def receive_video(client, message):
         reply_markup=resolution_keyboard
     )
 
-# 🔄 PROCESS COMPRESSION WITH LIVE PROGRESS BAR & 16:9 SUPPORT
+# 🔄 PROCESS COMPRESSION WITH LIVE PROGRESS BAR & TIMEOUT PROTECTION
 @app.on_callback_query(filters.regex(r"^comp_"))
 async def process_compression(client, callback_query):
     user_id = callback_query.from_user.id
@@ -303,7 +303,7 @@ async def process_compression(client, callback_query):
         await process.wait()
         
         if os.path.exists(output_file):
-            await status_msg.edit("📤 **Uploading compressed video...**")
+            await status_msg.edit("📤 **Uploading compressed video (this may take a minute)...**")
             
             # Size calculation for percentage reduction
             original_size = os.path.getsize(downloaded_path)
@@ -317,23 +317,33 @@ async def process_compression(client, callback_query):
             else:
                 saved_percent = 0
             
-            # Thumbnail preserve karne ki koshish agar original video mein thi
             thumb_path = None
             if msg.video and msg.video.thumbs:
-                thumb_path = await client.download_media(msg.video.thumbs[0].file_id)
+                try:
+                    thumb_path = await client.download_media(msg.video.thumbs[0].file_id)
+                except Exception:
+                    pass
             
-            await client.send_video(
-                chat_id=callback_query.message.chat.id,
-                video=output_file,
-                thumb=thumb_path,
-                supports_streaming=True, # 16:9 Widescreen aspect ratio fix
-                caption=(
-                    f"✅ **Compressed successfully to {resolution}P!**\n\n"
-                    f"📉 **Size Reduced:** `{saved_percent}%`\n"
-                    f"📊 **Original:** `{orig_mb:.2f} MB` ➔ **Compressed:** `{comp_mb:.2f} MB`\n\n"
-                    f"👑 **Developer:** @kage_x_edit"
+            # Upload with timeout protection (5 minutes limit) to prevent hanging
+            try:
+                await asyncio.wait_for(
+                    client.send_video(
+                        chat_id=callback_query.message.chat.id,
+                        video=output_file,
+                        thumb=thumb_path,
+                        supports_streaming=True,
+                        caption=(
+                            f"✅ **Compressed successfully to {resolution}P!**\n\n"
+                            f"📉 **Size Reduced:** `{saved_percent}%`\n"
+                            f"📊 **Original:** `{orig_mb:.2f} MB` ➔ **Compressed:** `{comp_mb:.2f} MB`\n\n"
+                            f"👑 **Developer:** @kage_x_edit"
+                        )
+                    ),
+                    timeout=300
                 )
-            )
+            except asyncio.TimeoutError:
+                await status_msg.edit("❌ **Upload timed out!** File size bohot badi hai ya server slow hai.")
+                return
             
             if thumb_path and os.path.exists(thumb_path):
                 os.remove(thumb_path)
