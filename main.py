@@ -229,7 +229,7 @@ async def receive_video(client, message):
         reply_markup=resolution_keyboard
     )
 
-# 🔄 PROCESS COMPRESSION WITH FIXED ASPECT RATIO & THUMBNAIL
+# 🔄 PROCESS COMPRESSION WITH FIXED SIZE & ERROR HANDLING
 @app.on_callback_query(filters.regex(r"^comp_"))
 async def process_compression(client, callback_query):
     user_id = callback_query.from_user.id
@@ -243,6 +243,13 @@ async def process_compression(client, callback_query):
     msg = USER_VIDEOS[user_id]
     duration = getattr(msg.video, "duration", 0) if (msg.video and hasattr(msg.video, "duration")) else 0
     
+    # Safe original size extraction from telegram message object directly
+    original_size = 0
+    if msg.video and hasattr(msg.video, "file_size"):
+        original_size = msg.video.file_size
+    elif msg.document and hasattr(msg.document, "file_size"):
+        original_size = msg.document.file_size
+
     status_msg = await callback_query.message.edit_text(f"🔄 **Downloading video for compression ({resolution}P)...**")
     
     input_file = f"input_{user_id}.mp4"
@@ -251,17 +258,18 @@ async def process_compression(client, callback_query):
     try:
         downloaded_path = await msg.download(file_name=input_file)
         
-        # Accurate original file size check before compression
-        original_size = os.path.getsize(downloaded_path) if os.path.exists(downloaded_path) else 0
+        # Fallback to local file size if telegram size was 0
+        if original_size == 0 and os.path.exists(downloaded_path):
+            original_size = os.path.getsize(downloaded_path)
         
-        await status_msg.edit(f"🗜️ **Compressing video to {resolution}P...**")
+        await status_msg.edit(f"🗜️ **Compressing video to {resolution}P with padding...**")
         
         if resolution == "480":
-            scale_filter = "scale=-2:480:flags=lanczos"
+            scale_filter = "scale=trunc(oh*a/2)*2:480,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
         elif resolution == "540":
-            scale_filter = "scale=960:540:flags=lanczos"
+            scale_filter = "scale=trunc(oh*a/2)*2:540,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
         else:
-            scale_filter = "scale=-2:720:flags=lanczos"
+            scale_filter = "scale=trunc(oh*a/2)*2:720,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
             
         command = [
             FFMPEG_PATH, "-i", downloaded_path,
@@ -311,10 +319,10 @@ async def process_compression(client, callback_query):
             
             compressed_size = os.path.getsize(output_file)
             
-            orig_mb = original_size / (1024 * 1024)
+            orig_mb = original_size / (1024 * 1024) if original_size > 0 else 0
             comp_mb = compressed_size / (1024 * 1024)
             
-            if original_size > 0:
+            if original_size > 0 and compressed_size < original_size:
                 saved_percent = int((1 - (compressed_size / original_size)) * 100)
             else:
                 saved_percent = 0
@@ -328,6 +336,10 @@ async def process_compression(client, callback_query):
                 pass
             
             original_caption = msg.caption or ""
+            # Safe truncation of caption if too long to prevent limit error
+            if len(original_caption) > 500:
+                original_caption = original_caption[:500] + "..."
+
             final_caption = (
                 f"✅ **Compressed to {resolution}P!**\n"
                 f"📉 **Size Reduced:** `{saved_percent}%` (`{orig_mb:.2f} MB` ➔ `{comp_mb:.2f} MB`)\n\n"
