@@ -49,8 +49,10 @@ userbot = Client(
 # Supabase Database Client Initialize
 supabase: SupabaseClient = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Temporary storage & states
+# Temporary storage & states for File Renamer Workflow
 USER_VIDEOS = {}
+USER_NEW_FILENAMES = {}
+WAITING_FOR_FILENAME = set()
 USER_SETTING_BANNER = set()
 USER_BANNERS = {}
 
@@ -69,8 +71,8 @@ async def start_command(client, message):
             InlineKeyboardButton("📥 Downloader", callback_data="downloader")
         ],
         [
-            InlineKeyboardButton("🗜️ Video Compressor", callback_data="compress_menu"),
-            InlineKeyboardButton("🖼️ Set Custom Banner", callback_data="set_banner_menu")
+            InlineKeyboardButton("🗜️ Video Compressor & Watermark", callback_data="compress_menu"),
+            InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")
         ],
         [
             InlineKeyboardButton("💎 Premium & Coins", callback_data="premium"),
@@ -80,21 +82,21 @@ async def start_command(client, message):
 
     await message.reply_text(
         f"👋 **Hello {username}!**\n\n"
-        f"Welcome to **Kage x Bot** 🚀\n"
+        f"Welcome to **Kage x File Renamer Bot** 🚀\n"
         f"👑 **Developer:** @kage_x_edit\n\n"
-        f"Neeche diye gaye buttons se features explore karein, ya koi bhi restricted link yahan bhej do save karne ke liye!",
+        f"Pehle apni thumbnail/logo bhej kar save karein, phir koi bhi video bhej kar rename aur watermark add karein!",
         reply_markup=menu_keyboard
     )
 
 @app.on_callback_query(filters.regex("compress_menu"))
 async def compress_menu(client, callback_query):
     await callback_query.message.edit_text(
-        "🗜️ **Video Watermark / Studio**\n"
+        "🗜 **Video Renamer & Watermark Studio**\n"
         "👑 **Developer:** @kage_x_edit\n\n"
-        "Bhai, apni video yahan direct bhej do. Banner lagane ke options mil jayenge!",
+        "Bhai, apni video yahan direct bhej do. Phir bot aapse naya filename aur output type puchega!",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🖼️ Set Custom Banner", callback_data="set_banner_menu")],
-            [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]
+            [InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")],
+            [InlineKeyboardButton("⬅️️ Back to Menu", callback_data="back_to_menu")]
         ])
     )
 
@@ -106,12 +108,12 @@ async def set_banner_menu(client, callback_query):
     banner_path = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
     has_banner = os.path.exists(banner_path)
     
-    status_text = "🟢 **Aapka current banner pehle se saved hai!** (Naya bhejne par update ho jayega)" if has_banner else "🔴 **Abhi koi banner saved nahi hai.**"
+    status_text = "🟢 **Aapka custom thumbnail pehle se saved hai!** (Naya bhejne par update ho jayega)" if has_banner else "🔴 **Abhi koi thumbnail saved nahi hai.**"
     
     await callback_query.message.edit_text(
-        f"🖼 **Custom Banner Setup**\n\n"
+        f"🖼 **Custom Thumbnail Setup**\n\n"
         f"{status_text}\n\n"
-        f"Ab apni **Logo ya Banner image (Photo)** yahan chat mein direct bhej do!",
+        f"Ab apni **Thumbnail ya Logo image (Photo)** yahan chat mein direct bhej do!",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]
         ])
@@ -122,6 +124,8 @@ async def back_to_menu(client, callback_query):
     user_id = callback_query.from_user.id
     if user_id in USER_SETTING_BANNER:
         USER_SETTING_BANNER.remove(user_id)
+    if user_id in WAITING_FOR_FILENAME:
+        WAITING_FOR_FILENAME.remove(user_id)
         
     menu_keyboard = InlineKeyboardMarkup([
         [
@@ -129,8 +133,8 @@ async def back_to_menu(client, callback_query):
             InlineKeyboardButton("📥 Downloader", callback_data="downloader")
         ],
         [
-            InlineKeyboardButton("🗜️ Video Compressor", callback_data="compress_menu"),
-            InlineKeyboardButton("🖼️ Set Custom Banner", callback_data="set_banner_menu")
+            InlineKeyboardButton("🗜️ Video Compressor & Watermark", callback_data="compress_menu"),
+            InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")
         ],
         [
             InlineKeyboardButton("💎 Premium & Coins", callback_data="premium"),
@@ -219,13 +223,11 @@ async def restricted_link_handler(client, message):
     except Exception as e:
         await progress_msg.edit(f"❌ Error aagaya bhai: `{str(e)}`")
 
-# 🖼️ HANDLE BANNER PHOTO OR VIDEO
-@app.on_message((filters.photo | filters.video | filters.document) & filters.private)
-async def receive_media(client, message):
+# 🖼 HANDLE PHOTO, VIDEO OR TEXT FILENAME INPUT
+@app.on_message(filters.photo & filters.private)
+async def receive_photo(client, message):
     user_id = message.from_user.id
-    
-    # 1. If user is in banner setting mode and sent a photo
-    if message.photo and user_id in USER_SETTING_BANNER:
+    if user_id in USER_SETTING_BANNER:
         USER_SETTING_BANNER.remove(user_id)
         banner_path = f"banner_{user_id}.png"
         downloaded_banner = await message.download(file_name=banner_path)
@@ -238,71 +240,68 @@ async def receive_media(client, message):
             ]
         ])
         await message.reply_text(
-            "✅ **Banner/Logo successfully save ho gaya hai!**\n\n"
-            "Ab aap jab bhi video bhejenge, ye banner automatically video par lag jayega.",
+            "✅ **Thumbnail Saved**\n\n"
+            "Ab aap jab bhi video bhejenge, ye thumbnail video par lag jayegi.",
             reply_markup=menu_keyboard
         )
-        return
 
-    if message.text and "t.me/" in message.text:
-        return
-
+@app.on_message((filters.video | filters.document) & filters.private)
+async def receive_video(client, message):
+    user_id = message.from_user.id
     if message.document and not message.document.mime_type.startswith("video"):
         return
 
-    # 2. Handle incoming video
-    if message.video or message.document:
-        USER_VIDEOS[user_id] = message
+    USER_VIDEOS[user_id] = message
+    WAITING_FOR_FILENAME.add(user_id)
+    
+    old_file_name = "video.mp4"
+    if message.video and message.video.file_name:
+        old_file_name = message.video.file_name
+    elif message.document and message.document.file_name:
+        old_file_name = message.document.file_name
+
+    await message.reply_text(
+        f"Please Enter New Filename...\n\n"
+        f"Old File Name :- `{old_file_name}`"
+    )
+
+@app.on_message(filters.text & filters.private)
+async def receive_filename(client, message):
+    user_id = message.from_user.id
+    if user_id in WAITING_FOR_FILENAME:
+        WAITING_FOR_FILENAME.remove(user_id)
+        new_name = message.text.strip()
+        if not new_name.endswith((".mp4", ".mkv", ".avi", ".mov")):
+            new_name += ".mp4"
+            
+        USER_NEW_FILENAMES[user_id] = new_name
         
-        banner_path = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
-        has_banner = os.path.exists(banner_path)
-        banner_status = "🟢 Custom Banner Detected" if has_banner else "🔴 No Banner Set (Click 'Set Custom Banner')"
-        
-        options_keyboard = InlineKeyboardMarkup([
+        type_keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("⚡ Original Quality (Banner ke sath)", callback_data="comp_original")
-            ],
-            [
-                InlineKeyboardButton("📱 480P", callback_data="comp_480p"),
-                InlineKeyboardButton("💻 540P", callback_data="comp_540p")
-            ],
-            [
-                InlineKeyboardButton("🎬 720P", callback_data="comp_720p"),
-                InlineKeyboardButton("🖼️ Change Banner", callback_data="set_banner_menu")
-            ],
-            [
-                InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")
+                InlineKeyboardButton("📁 Document", callback_data="type_document"),
+                InlineKeyboardButton("🎬 Video", callback_data="type_video")
             ]
         ])
         
         await message.reply_text(
-            f"🎬 **Video mil gayi bhai!**\n"
-            f"Status: `{banner_status}`\n\n"
-            f"Select option:",
-            reply_markup=options_keyboard
+            f"Select The Output File Type\n\n"
+            f"File Name :- `{new_name}`",
+            reply_markup=type_keyboard
         )
 
-# 🔄 PROCESS BANNER & COMPRESSION/ORIGINAL
-@app.on_callback_query(filters.regex(r"^comp_"))
-async def process_compression(client, callback_query):
+# 🔄 PROCESS RENAME & UPLOAD (DOCUMENT OR VIDEO)
+@app.on_callback_query(filters.regex(r"^type_"))
+async def process_renaming(client, callback_query):
     user_id = callback_query.from_user.id
-    if user_id not in USER_VIDEOS:
-        await callback_query.answer("⚠ Koi video nahi mili! Dubara video bhejo.", show_alert=True)
+    if user_id not in USER_VIDEOS or user_id not in USER_NEW_FILENAMES:
+        await callback_query.answer("⚠ Session expired! Dubara video bhejo.", show_alert=True)
         return
 
-    data = callback_query.data
-    is_original = "original" in data
-    resolution = "Original" if is_original else ("480" if "480p" in data else ("540" if "540p" in data else "720"))
-    
+    is_document = "document" in callback_query.data
     msg = USER_VIDEOS[user_id]
+    new_filename = USER_NEW_FILENAMES[user_id]
     
-    original_size = 0
-    if msg.video and hasattr(msg.video, "file_size"):
-        original_size = msg.video.file_size
-    elif msg.document and hasattr(msg.document, "file_size"):
-        original_size = msg.document.file_size
-
-    status_msg = await callback_query.message.edit_text(f"🔄 **Downloading video (Mode: {resolution})...**")
+    status_msg = await callback_query.message.edit_text("Fast download...")
     
     input_file = f"input_{user_id}.mp4"
     output_file = f"output_{user_id}.mp4"
@@ -310,6 +309,8 @@ async def process_compression(client, callback_query):
     
     try:
         last_dl_time = [0]
+        file_size = msg.video.file_size if msg.video else (msg.document.file_size if msg.document else 0)
+        
         async def dl_progress(current, total):
             if total > 0:
                 now = time.time()
@@ -317,179 +318,98 @@ async def process_compression(client, callback_query):
                     last_dl_time[0] = now
                     pct = int(current * 100 / total)
                     pct = max(0, min(100, pct))
+                    filled_blocks = int(pct / 10)
+                    bar = "█" * filled_blocks + "░" * (10 - filled_blocks)
+                    speed = current / (max(1, now - last_dl_time[0]) * 1024 * 1024)
                     try:
                         await status_msg.edit(
-                            f"📥 **Downloading video ({pct}%)...**\n"
-                            f"📊 `{current / (1024*1024):.2f} MB` / `{total / (1024*1024):.2f} MB`"
+                            f"Progress: [{bar}] {pct}%\n"
+                            f"📥 Downloading: {current / (1024*1024):.1f} Mb | {total / (1024*1024):.2f} Mb\n"
+                            f"⚡ Speed: {speed:.2f} Mb/s\n"
+                            f"⏱️ Time elapsed: 0m 10s"
                         )
                     except Exception:
                         pass
 
         downloaded_path = await msg.download(file_name=input_file, progress=dl_progress)
         
-        if original_size == 0 and os.path.exists(downloaded_path):
-            original_size = os.path.getsize(downloaded_path)
+        await status_msg.edit("Trying To Uploading....")
         
-        await status_msg.edit(f"🖼️ **Applying Banner (Mode: {resolution})...**")
-        
-        def get_video_duration(file_path):
-            try:
-                cmd = [FFMPEG_PATH, "-i", file_path]
-                result = subprocess.run(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-                match = re.search(r"Duration: (\d{2}):(\d{2}):(\d{2}\.\d{2})", result.stderr)
-                if match:
-                    hrs, mins, secs = map(float, match.groups())
-                    return hrs * 3600 + mins * 60 + secs
-            except Exception:
-                pass
-            return 0
-
-        duration = get_video_duration(downloaded_path)
         has_banner = os.path.exists(banner_file)
         
-        if is_original:
-            if has_banner:
-                # Original resolution par high quality (crf 18) ke sath banner overlay karega
-                filter_complex = f"[1:v]scale=-1:60[banner];[0:v][banner]overlay=W-w-15:15[v]"
-                command = [
-                    FFMPEG_PATH, "-i", downloaded_path, "-i", banner_file,
-                    "-filter_complex", filter_complex,
-                    "-map", "[v]", "-map", "0:a?",
-                    "-c:v", "libx264", "-crf", "18",
-                    "-c:a", "copy",
-                    output_file, "-y"
-                ]
-            else:
-                command = [
-                    FFMPEG_PATH, "-i", downloaded_path,
-                    "-c", "copy",
-                    output_file, "-y"
-                ]
+        # If custom banner/logo exists, burn it into video, otherwise copy stream directly
+        if has_banner:
+            filter_complex = f"[1:v]scale=-1:60[banner];[0:v][banner]overlay=W-w-15:15[v]"
+            command = [
+                FFMPEG_PATH, "-i", downloaded_path, "-i", banner_file,
+                "-filter_complex", filter_complex,
+                "-map", "[v]", "-map", "0:a?",
+                "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                "-c:a", "aac", "-b:a", "192k",
+                output_file, "-y"
+            ]
         else:
-            if resolution == "480":
-                base_scale = "scale=trunc(oh*a/2)*2:480,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
-            elif resolution == "540":
-                base_scale = "scale=trunc(oh*a/2)*2:540,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
-            else:
-                base_scale = "scale=trunc(oh*a/2)*2:720,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
-
-            if has_banner:
-                filter_complex = f"[0:v]{base_scale}[scaled];[1:v]scale=-1:60[banner];[scaled][banner]overlay=W-w-15:15[v]"
-                command = [
-                    FFMPEG_PATH, "-i", downloaded_path, "-i", banner_file,
-                    "-filter_complex", filter_complex,
-                    "-map", "[v]", "-map", "0:a?",
-                    "-c:v", "libx264", "-crf", "28",
-                    "-c:a", "aac", "-b:a", "128k",
-                    output_file, "-y"
-                ]
-            else:
-                command = [
-                    FFMPEG_PATH, "-i", downloaded_path,
-                    "-vf", base_scale,
-                    "-c:v", "libx264", "-crf", "28",
-                    "-c:a", "aac", "-b:a", "128k",
-                    output_file, "-y"
-                ]
-        
+            command = [
+                FFMPEG_PATH, "-i", downloaded_path,
+                "-c", "copy",
+                output_file, "-y"
+            ]
+            
         process = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        
-        last_percent = -1
-        buffer = b""
-        while True:
-            chunk = await process.stderr.read(1024)
-            if not chunk:
-                break
-            buffer += chunk
-            while b"\n" in buffer or b"\r" in buffer:
-                if b"\n" in buffer:
-                    line, buffer = buffer.split(b"\n", 1)
-                else:
-                    line, buffer = buffer.split(b"\r", 1)
-                
-                line_str = line.decode('utf-8', errors='ignore')
-                time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2}\.\d{2})", line_str)
-                if time_match and duration > 0:
-                    hrs, mins, secs = map(float, time_match.groups())
-                    current_seconds = hrs * 3600 + mins * 60 + secs
-                    percent = int((current_seconds / duration) * 100)
-                    percent = max(0, min(100, percent))
-                    
-                    if percent != last_percent and percent % 5 == 0:
-                        last_percent = percent
-                        filled_blocks = int(percent / 10)
-                        bar = "█" * filled_blocks + "░" * (10 - filled_blocks)
-                        try:
-                            await status_msg.edit(
-                                f"🖼️ **Adding Banner (Mode: {resolution})...\n\n"
-                                f"[{bar}] **{percent}%**"
-                            )
-                        except Exception:
-                            pass
-
         await process.wait()
         
-        if os.path.exists(output_file):
-            await status_msg.edit("📤 **Uploading processed video...**")
-            
-            processed_size = os.path.getsize(output_file)
-            orig_mb = original_size / (1024 * 1024) if original_size > 0 else 0
-            proc_mb = processed_size / (1024 * 1024)
-            
-            thumb_path = None
+        final_file = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
+        
+        # Rename file locally to new filename
+        renamed_path = os.path.join(os.path.dirname(final_file), new_filename)
+        if os.path.exists(renamed_path):
+            os.remove(renamed_path)
+        os.rename(final_file, renamed_path)
+        
+        # Get thumbnail (either custom saved banner or video thumbnail)
+        thumb_path = banner_file if has_banner else None
+        if not thumb_path and msg.video and msg.video.thumbs:
             try:
-                if msg.video and msg.video.thumbs:
-                    thumb_path = await client.download_media(msg.video.thumbs[0].file_id)
+                thumb_path = await client.download_media(msg.video.thumbs[0].file_id)
             except Exception:
                 pass
-            
-            original_caption = msg.caption or ""
-            if len(original_caption) > 300:
-                original_caption = original_caption[:300] + "..."
 
-            final_caption = (
-                f"✅ **Banner Added Successfully ({resolution} Quality)!**\n"
-                f"📊 **Size:** `{proc_mb:.2f} MB` (Original: `{orig_mb:.2f} MB`)\n\n"
-                f"{original_caption}\n\n"
-                f"👑 **Developer:** @kage_x_edit"
+        if is_document:
+            await client.send_document(
+                chat_id=callback_query.message.chat.id,
+                document=renamed_path,
+                thumb=thumb_path,
+                caption=new_filename
+            )
+        else:
+            await client.send_video(
+                chat_id=callback_query.message.chat.id,
+                video=renamed_path,
+                thumb=thumb_path,
+                supports_streaming=True,
+                caption=new_filename
             )
             
-            try:
-                await asyncio.wait_for(
-                    client.send_video(
-                        chat_id=callback_query.message.chat.id,
-                        video=output_file,
-                        thumb=thumb_path,
-                        supports_streaming=True,
-                        caption=final_caption
-                    ),
-                    timeout=300
-                )
-            except asyncio.TimeoutError:
-                await status_msg.edit("❌ **Upload timed out!**")
-                return
+        if thumb_path and thumb_path != banner_file and os.path.exists(thumb_path):
+            os.remove(thumb_path)
             
-            if thumb_path and os.path.exists(thumb_path):
-                os.remove(thumb_path)
-                
-            await status_msg.delete()
-        else:
-            await status_msg.edit("❌ Process fail ho gaya bhai!")
-            
+        await status_msg.delete()
+        
     except Exception as _err:
         await status_msg.edit(f"❌ Error: `{str(_err)}`")
         
     finally:
-        if os.path.exists(input_file):
-            os.remove(input_file)
-        if os.path.exists(output_file):
-            os.remove(output_file)
+        for f in [input_file, output_file]:
+            if os.path.exists(f):
+                os.remove(f)
         if user_id in USER_VIDEOS:
             del USER_VIDEOS[user_id]
+        if user_id in USER_NEW_FILENAMES:
+            del USER_NEW_FILENAMES[user_id]
 
 # Simple HTTP Server for Railway
 class SimpleHandler(BaseHTTPRequestHandler):
