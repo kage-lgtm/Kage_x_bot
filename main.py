@@ -3,9 +3,6 @@ import logging
 import asyncio
 import re
 import time
-import base64
-import urllib.parse
-import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 from pyrogram import Client, filters
@@ -26,10 +23,6 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
 # 👑 ADMINS CONFIGURATION
 ADMINS = [5074717463, 6144546817]
-
-# ShrinkMe.io Configuration
-SHRINKME_API_TOKEN = os.environ.get("SHRINKME_API", "YOUR_SHRINKME_API_KEY")
-SHRINKME_ALIAS = os.environ.get("SHRINKME_ALIAS", "shrinkme.io")
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
@@ -68,53 +61,6 @@ async def start_command(client, message):
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
 
-    # Handle secure link click -> Send Ad Link (ShrinkMe) first
-    if len(message.command) > 1 and message.command[1].startswith("secure_"):
-        token = message.command[1].replace("secure_", "")
-        
-        # Create a final unlock target back to bot with verified token
-        bot_username = (await client.get_me()).username
-        unlock_target = f"https://t.me/{bot_username}?start=unlock_{token}"
-        
-        # Generate ShrinkMe short link
-        short_url = unlock_target
-        try:
-            api_req_url = f"https://{SHRINKME_ALIAS}/api?api={SHRINKME_API_TOKEN}&url={urllib.parse.quote(unlock_target)}"
-            req = urllib.request.urlopen(api_req_url, timeout=5)
-            res = json.loads(req.read().decode('utf-8'))
-            if res.get("status") == "success":
-                short_url = res.get("shortenedUrl")
-        except Exception:
-            pass
-
-        ad_keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔗 Click Here to Watch Ad & Unlock Link", url=short_url)]
-        ])
-        
-        await message.reply_text(
-            "🔒 **Protected Link Detected!**\n\n"
-            "Is file ya link ko access karne ke liye pehle chota sa ad complete karein:",
-            reply_markup=ad_keyboard
-        )
-        return
-
-    # Handle final unlock after ad completion
-    if len(message.command) > 1 and message.command[1].startswith("unlock_"):
-        token = message.command[1].replace("unlock_", "")
-        try:
-            decoded_bytes = base64.urlsafe_b64decode(token.encode("utf-8"))
-            original_link = decoded_bytes.decode("utf-8")
-            
-            await message.reply_text(
-                f"🎉 **Ad Completed Successfully!**\n\n"
-                f"Aapka original link yeh raha:\n"
-                f"🔗 {original_link}"
-            )
-            return
-        except Exception:
-            await message.reply_text("❌ **Invalid or Expired Link!**")
-            return
-
     menu_keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📁 My Files / Hub", callback_data="my_files"),
@@ -125,7 +71,6 @@ async def start_command(client, message):
             InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")
         ],
         [
-            InlineKeyboardButton("🔐 Link Protector", callback_data="protector_menu"),
             InlineKeyboardButton("💎 Premium", callback_data="premium")
         ]
     ])
@@ -169,20 +114,6 @@ async def set_banner_menu(client, callback_query):
         ])
     )
 
-@app.on_callback_query(filters.regex("protector_menu"))
-async def protector_menu(client, callback_query):
-    await callback_query.message.edit_text(
-        "🔐 **Protected Link Generator (LkProtector)**\n"
-        "👑 **Developer:** @kage_x_edit\n\n"
-        "Kisi bhi link ko secure protect karne ke liye is format mein command bhejein:\n"
-        "`/protect <tumhara_link>`\n\n"
-        "Example:\n"
-        "`/protect https://t.me/+G1ca0WgdltQyZjU1`",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]
-        ])
-    )
-
 @app.on_callback_query(filters.regex("back_to_menu"))
 async def back_to_menu(client, callback_query):
     user_id = callback_query.from_user.id
@@ -201,7 +132,6 @@ async def back_to_menu(client, callback_query):
             InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")
         ],
         [
-            InlineKeyboardButton("🔐 Link Protector", callback_data="protector_menu"),
             InlineKeyboardButton("💎 Premium", callback_data="premium")
         ]
     ])
@@ -211,34 +141,6 @@ async def back_to_menu(client, callback_query):
         "Neeche diye gaye buttons se features explore karein:",
         reply_markup=menu_keyboard
     )
-
-# 🔐 PROTECTED LINK GENERATOR COMMAND (/protect)
-@app.on_message(filters.command("protect") & filters.private)
-async def protect_link_command(client, message):
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        await message.reply_text(
-            "⚠️ **Invalid Format!**\n\n"
-            "Sahi tarika:\n`/protect <tumhara_link>`"
-        )
-        return
-
-    raw_link = args[1].strip()
-    
-    # Encode link securely using Base64
-    encoded_bytes = base64.urlsafe_b64encode(raw_link.encode("utf-8"))
-    encoded_str = encoded_bytes.decode("utf-8")
-    
-    bot_username = (await client.get_me()).username
-    protected_url = f"https://t.me/{bot_username}?start=secure_{encoded_str}"
-    
-    response_text = (
-        f"🔐 **Protected Link Generated:**\n"
-        f"`{protected_url}`\n\n"
-        f"✨ *Ab jab koi is link par click karega, pehle ad dekhna padega tabhi file/link unlock hoga!*"
-    )
-    
-    await message.reply_text(response_text)
 
 # 📥 SAVE RESTRICTED CONTENT HANDLER
 @app.on_message(filters.regex(r"https?://t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)") & filters.private)
