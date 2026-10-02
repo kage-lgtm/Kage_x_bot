@@ -4,6 +4,8 @@ import asyncio
 import re
 import time
 import base64
+import urllib.parse
+import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 from pyrogram import Client, filters
@@ -24,6 +26,10 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
 # 👑 ADMINS CONFIGURATION
 ADMINS = [5074717463, 6144546817]
+
+# ShrinkMe.io Configuration
+SHRINKME_API_TOKEN = os.environ.get("SHRINKME_API", "YOUR_SHRINKME_API_KEY")
+SHRINKME_ALIAS = os.environ.get("SHRINKME_ALIAS", "shrinkme.io")
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
@@ -62,22 +68,51 @@ async def start_command(client, message):
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
 
-    # Handle start with secure protected link parameter
+    # Handle secure link click -> Send Ad Link (ShrinkMe) first
     if len(message.command) > 1 and message.command[1].startswith("secure_"):
         token = message.command[1].replace("secure_", "")
+        
+        # Create a final unlock target back to bot with verified token
+        bot_username = (await client.get_me()).username
+        unlock_target = f"https://t.me/{bot_username}?start=unlock_{token}"
+        
+        # Generate ShrinkMe short link
+        short_url = unlock_target
+        try:
+            api_req_url = f"https://{SHRINKME_ALIAS}/api?api={SHRINKME_API_TOKEN}&url={urllib.parse.quote(unlock_target)}"
+            req = urllib.request.urlopen(api_req_url, timeout=5)
+            res = json.loads(req.read().decode('utf-8'))
+            if res.get("status") == "success":
+                short_url = res.get("shortenedUrl")
+        except Exception:
+            pass
+
+        ad_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔗 Click Here to Watch Ad & Unlock Link", url=short_url)]
+        ])
+        
+        await message.reply_text(
+            "🔒 **Protected Link Detected!**\n\n"
+            "Is file ya link ko access karne ke liye pehle chota sa ad complete karein:",
+            reply_markup=ad_keyboard
+        )
+        return
+
+    # Handle final unlock after ad completion
+    if len(message.command) > 1 and message.command[1].startswith("unlock_"):
+        token = message.command[1].replace("unlock_", "")
         try:
             decoded_bytes = base64.urlsafe_b64decode(token.encode("utf-8"))
             original_link = decoded_bytes.decode("utf-8")
             
             await message.reply_text(
-                f"✅ **Protected Link Unlocked Successfully!**\n\n"
+                f"🎉 **Ad Completed Successfully!**\n\n"
                 f"Aapka original link yeh raha:\n"
-                f"🔗 {original_link}\n\n"
-                f"Ab aap isse access kar sakte hain."
+                f"🔗 {original_link}"
             )
             return
         except Exception:
-            await message.reply_text("❌ **Invalid or Expired Protected Link!**")
+            await message.reply_text("❌ **Invalid or Expired Link!**")
             return
 
     menu_keyboard = InlineKeyboardMarkup([
@@ -99,7 +134,7 @@ async def start_command(client, message):
         f"👋 **Hello {username}!**\n\n"
         f"Welcome to **Kage x Bot** 🚀\n"
         f"👑 **Developer:** @kage_x_edit\n\n"
-        f"Aap yahan files rename karne ke sath-sath **Link Protector (`/protect`)** ka use bhi kar sakte hain!",
+        f"Neeche diye gaye buttons se features explore karein:",
         reply_markup=menu_keyboard
     )
 
@@ -198,9 +233,9 @@ async def protect_link_command(client, message):
     protected_url = f"https://t.me/{bot_username}?start=secure_{encoded_str}"
     
     response_text = (
-        f"🔐 **Protected Link:**\n"
+        f"🔐 **Protected Link Generated:**\n"
         f"`{protected_url}`\n\n"
-        f"✨ *Yeh link fully protected hai, user start karega tabhi original link access kar payega!*"
+        f"✨ *Ab jab koi is link par click karega, pehle ad dekhna padega tabhi file/link unlock hoga!*"
     )
     
     await message.reply_text(response_text)
