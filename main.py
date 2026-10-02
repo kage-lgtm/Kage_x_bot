@@ -303,11 +303,11 @@ async def process_compression(client, callback_query):
         await process.wait()
         
         if os.path.exists(output_file):
-            await status_msg.edit("📤 **Uploading compressed video (this may take a minute)...**")
+            await status_msg.edit("📤 **Uploading compressed video...**")
             
-            # Size calculation for percentage reduction
-            original_size = os.path.getsize(downloaded_path)
-            compressed_size = os.path.getsize(output_file)
+            # Safe size calculation
+            original_size = os.path.getsize(input_file) if os.path.exists(input_file) else 0
+            compressed_size = os.path.getsize(output_file) if os.path.exists(output_file) else 0
             
             orig_mb = original_size / (1024 * 1024)
             comp_mb = compressed_size / (1024 * 1024)
@@ -324,7 +324,16 @@ async def process_compression(client, callback_query):
                 except Exception:
                     pass
             
-            # Upload with timeout protection (5 minutes limit) to prevent hanging
+            # Custom caption keeping original caption and adding compression stats
+            original_caption = msg.caption or ""
+            final_caption = (
+                f"✅ **Compressed to {resolution}P!**\n"
+                f"📉 **Size Reduced:** `{saved_percent}%` (`{orig_mb:.2f} MB` ➔ `{comp_mb:.2f} MB`)\n\n"
+                f"{original_caption}\n\n"
+                f"👑 **Developer:** @kage_x_edit"
+            )
+            
+            # Upload with timeout protection (5 minutes limit)
             try:
                 await asyncio.wait_for(
                     client.send_video(
@@ -332,12 +341,7 @@ async def process_compression(client, callback_query):
                         video=output_file,
                         thumb=thumb_path,
                         supports_streaming=True,
-                        caption=(
-                            f"✅ **Compressed successfully to {resolution}P!**\n\n"
-                            f"📉 **Size Reduced:** `{saved_percent}%`\n"
-                            f"📊 **Original:** `{orig_mb:.2f} MB` ➔ **Compressed:** `{comp_mb:.2f} MB`\n\n"
-                            f"👑 **Developer:** @kage_x_edit"
-                        )
+                        caption=final_caption
                     ),
                     timeout=300
                 )
