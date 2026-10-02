@@ -49,8 +49,9 @@ userbot = Client(
 # Supabase Database Client Initialize
 supabase: SupabaseClient = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Temporary storage for video compression sessions
+# Temporary storage & states
 USER_VIDEOS = {}
+USER_SETTING_BANNER = set()
 
 @app.on_message(filters.command("start"))
 async def start_command(client, message):
@@ -67,7 +68,8 @@ async def start_command(client, message):
             InlineKeyboardButton("📥 Downloader", callback_data="downloader")
         ],
         [
-            InlineKeyboardButton("🗜️ Video Compressor", callback_data="compress_menu")
+            InlineKeyboardButton("🗜️ Video Compressor", callback_data="compress_menu"),
+            InlineKeyboardButton("🖼️ Set Custom Banner", callback_data="set_banner_menu")
         ],
         [
             InlineKeyboardButton("💎 Premium & Coins", callback_data="premium"),
@@ -88,7 +90,27 @@ async def compress_menu(client, callback_query):
     await callback_query.message.edit_text(
         "🗜️ **Video Compressor Studio**\n"
         "👑 **Developer:** @kage_x_edit\n\n"
-        "Bhai, apni video yahan direct bhej do. Uske baad main tujhe quality options dunga ki kis resolution mein compress karna hai!",
+        "Bhai, apni video yahan direct bhej do. Pehle apna custom banner set zaroor kar lena!",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖼️ Set Custom Banner", callback_data="set_banner_menu")],
+            [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]
+        ])
+    )
+
+@app.on_callback_query(filters.regex("set_banner_menu"))
+async def set_banner_menu(client, callback_query):
+    user_id = callback_query.from_user.id
+    USER_SETTING_BANNER.add(user_id)
+    
+    banner_path = f"banner_{user_id}.png"
+    has_banner = os.paths.exists(banner_path) if hasattr(os, "paths") else os.path.exists(banner_path)
+    
+    status_text = "🟢 **Aapka current banner pehle se saved hai!** (Naya bhejne par update ho jayega)" if has_banner else "🔴 **Abhi koi banner saved nahi hai.**"
+    
+    await callback_query.message.edit_text(
+        f"🖼️️ **Custom Banner Setup**\n\n"
+        f"{status_text}\n\n"
+        f"Ab apni **Logo ya Banner image (Photo)** yahan chat mein direct bhej do!",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]
         ])
@@ -96,13 +118,18 @@ async def compress_menu(client, callback_query):
 
 @app.on_callback_query(filters.regex("back_to_menu"))
 async def back_to_menu(client, callback_query):
+    user_id = callback_query.from_user.id
+    if user_id in USER_SETTING_BANNER:
+        USER_SETTING_BANNER.remove(user_id)
+        
     menu_keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📁 My Files / Hub", callback_data="my_files"),
             InlineKeyboardButton("📥 Downloader", callback_data="downloader")
         ],
         [
-            InlineKeyboardButton("🗜️ Video Compressor", callback_data="compress_menu")
+            InlineKeyboardButton("🗜️ Video Compressor", callback_data="compress_menu"),
+            InlineKeyboardButton("🖼️ Set Custom Banner", callback_data="set_banner_menu")
         ],
         [
             InlineKeyboardButton("💎 Premium & Coins", callback_data="premium"),
@@ -120,7 +147,6 @@ async def back_to_menu(client, callback_query):
 @app.on_message(filters.regex(r"https?://t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)") & filters.private)
 async def restricted_link_handler(client, message):
     link = message.text.strip()
-    
     match = re.search(r"t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)", link)
     if not match:
         return
@@ -128,10 +154,7 @@ async def restricted_link_handler(client, message):
     chat_identifier = match.group(1)
     msg_id = int(match.group(2))
     
-    if chat_identifier.isdigit():
-        chat_id = int("-100" + chat_identifier)
-    else:
-        chat_id = "@" + chat_identifier
+    chat_id = int("-100" + chat_identifier) if chat_identifier.isdigit() else "@" + chat_identifier
         
     progress_msg = await message.reply_text("📥 **Fetching restricted content...**")
     
@@ -155,14 +178,12 @@ async def restricted_link_handler(client, message):
 
     try:
         target_msg = await userbot.get_messages(chat_id, msg_id)
-        
         if not target_msg or target_msg.empty:
             await progress_msg.edit("❌ Ye message nahi mila ya delete ho gaya hai!")
             return
             
         if target_msg.media:
             file_path = await target_msg.download(progress=progress_callback)
-            
             await progress_msg.edit("📤 **Uploading file to you...**")
             
             if target_msg.video:
@@ -180,10 +201,8 @@ async def restricted_link_handler(client, message):
                     supports_streaming=True,
                     caption=target_msg.caption or ""
                 )
-                
                 if thumb_path and os.path.exists(thumb_path):
                     os.remove(thumb_path)
-                    
             elif target_msg.document:
                 await client.send_document(chat_id=message.chat.id, document=file_path, caption=target_msg.caption or "")
             elif target_msg.photo:
@@ -197,52 +216,69 @@ async def restricted_link_handler(client, message):
             await client.send_message(chat_id=message.chat.id, text=target_msg.text or "")
             
         await progress_msg.delete()
-        
     except Exception as e:
         await progress_msg.edit(f"❌ Error aagaya bhai: `{str(e)}`")
 
-# 🗜️ HANDLE INCOMING VIDEOS
-@app.on_message((filters.video | filters.document) & filters.private)
-async def receive_video(client, message):
+# 🖼️ HANDLE BANNER PHOTO OR VIDEO
+@app.on_message((filters.photo | filters.video | filters.document) & filters.private)
+async def receive_media(client, message):
     user_id = message.from_user.id
     
-    if message.document and not message.document.mime_type.startswith("video"):
+    # 1. If user is in banner setting mode and sent a photo
+    if message.photo and user_id in USER_SETTING_BANNER:
+        USER_SETTING_BANNER.remove(user_id)
+        banner_path = f"banner_{user_id}.png"
+        await message.download(file_name=banner_path)
+        
+        menu_keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🗜️ Compressor Menu", callback_data="compress_menu"),
+                InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")
+            ]
+        ])
+        await message.reply_text(
+            "✅ **Banner/Logo successfully save ho gaya hai!**\n\n"
+            "Ab aap jab bhi video bhejenge, ye banner automatically video par lag jayega.",
+            reply_markup=menu_keyboard
+        )
         return
 
     if message.text and "t.me/" in message.text:
         return
 
-    USER_VIDEOS[user_id] = message
-    
-    resolution_keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("📱 480P", callback_data="comp_480p"),
-            InlineKeyboardButton("💻 540P", callback_data="comp_540p")
-        ],
-        [
-            InlineKeyboardButton("🎬 720P (Original)", callback_data="comp_720p"),
-            InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")
-        ]
-    ])
-    
-    await message.reply_text(
-        "🎬 **Video mil gayi bhai!**\n\nSelect resolution to compress:",
-        reply_markup=resolution_keyboard
-    )
+    if message.document and not message.document.mime_type.startswith("video"):
+        return
 
-def get_video_duration(file_path):
-    try:
-        cmd = [FFMPEG_PATH, "-i", file_path]
-        result = subprocess.run(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-        match = re.search(r"Duration: (\d{2}):(\d{2}):(\d{2}\.\d{2})", result.stderr)
-        if match:
-            hrs, mins, secs = map(float, match.groups())
-            return hrs * 3600 + mins * 60 + secs
-    except Exception:
-        pass
-    return 0
+    # 2. Handle incoming video for compression
+    if message.video or message.document:
+        USER_VIDEOS[user_id] = message
+        
+        banner_path = f"banner_{user_id}.png"
+        has_banner = os.path.exists(banner_path)
+        banner_status = "🟢 Custom Banner Detected" if has_banner else "🔴 No Banner Set (Click 'Set Custom Banner')"
+        
+        resolution_keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("📱 480P", callback_data="comp_480p"),
+                InlineKeyboardButton("💻 540P", callback_data="comp_540p")
+            ],
+            [
+                InlineKeyboardButton("🎬 720P (Original)", callback_data="comp_720p"),
+                InlineKeyboardButton("🖼️ Change Banner", callback_data="set_banner_menu")
+            ],
+            [
+                InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")
+            ]
+        ])
+        
+        await message.reply_text(
+            f"🎬 **Video mil gayi bhai!**\n"
+            f"Status: `{banner_status}`\n\n"
+            f"Select resolution to compress:",
+            reply_markup=resolution_keyboard
+        )
 
-# 🔄 PROCESS COMPRESSION WITH FIXED CAPTION SPLIT ERROR
+# 🔄 PROCESS COMPRESSION WITH SAVED BANNER
 @app.on_callback_query(filters.regex(r"^comp_"))
 async def process_compression(client, callback_query):
     user_id = callback_query.from_user.id
@@ -265,6 +301,7 @@ async def process_compression(client, callback_query):
     
     input_file = f"input_{user_id}.mp4"
     output_file = f"output_{user_id}.mp4"
+    banner_file = f"banner_{user_id}.png"
     
     try:
         last_dl_time = [0]
@@ -288,24 +325,48 @@ async def process_compression(client, callback_query):
         if original_size == 0 and os.path.exists(downloaded_path):
             original_size = os.path.getsize(downloaded_path)
         
-        await status_msg.edit(f"🗜️ **Analyzing & Compressing video to {resolution}P...**")
+        await status_msg.edit(f"🗜️ **Applying Banner & Compressing video to {resolution}P...**")
         
+        def get_video_duration(file_path):
+            try:
+                cmd = [FFMPEG_PATH, "-i", file_path]
+                result = subprocess.run(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+                match = re.search(r"Duration: (\d{2}):(\d{2}):(\d{2}\.\d{2})", result.stderr)
+                if match:
+                    hrs, mins, secs = map(float, match.groups())
+                    return hrs * 3600 + mins * 60 + secs
+            except Exception:
+                pass
+            return 0
+
         duration = get_video_duration(downloaded_path)
+        has_banner = os.path.exists(banner_file)
         
         if resolution == "480":
-            scale_filter = "scale=trunc(oh*a/2)*2:480,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
+            base_scale = "scale=trunc(oh*a/2)*2:480,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
         elif resolution == "540":
-            scale_filter = "scale=trunc(oh*a/2)*2:540,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
+            base_scale = "scale=trunc(oh*a/2)*2:540,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
         else:
-            scale_filter = "scale=trunc(oh*a/2)*2:720,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
-            
-        command = [
-            FFMPEG_PATH, "-i", downloaded_path,
-            "-vf", scale_filter,
-            "-c:v", "libx264", "-crf", "28",
-            "-c:a", "aac", "-b:a", "128k",
-            output_file, "-y"
-        ]
+            base_scale = "scale=trunc(oh*a/2)*2:720,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
+
+        if has_banner:
+            filter_complex = f"[0:v]{base_scale}[scaled];[1:v]scale=-1:60[banner];[scaled][banner]overlay=W-w-15:15[v]"
+            command = [
+                FFMPEG_PATH, "-i", downloaded_path, "-i", banner_file,
+                "-filter_complex", filter_complex,
+                "-map", "[v]", "-map", "0:a?",
+                "-c:v", "libx264", "-crf", "28",
+                "-c:a", "aac", "-b:a", "128k",
+                output_file, "-y"
+            ]
+        else:
+            command = [
+                FFMPEG_PATH, "-i", downloaded_path,
+                "-vf", base_scale,
+                "-c:v", "libx264", "-crf", "28",
+                "-c:a", "aac", "-b:a", "128k",
+                output_file, "-y"
+            ]
         
         process = await asyncio.create_subprocess_exec(
             *command,
@@ -340,7 +401,7 @@ async def process_compression(client, callback_query):
                         bar = "█" * filled_blocks + "░" * (10 - filled_blocks)
                         try:
                             await status_msg.edit(
-                                f"🗜️ **Compressing to {resolution}P...**\n\n"
+                                f"🗜️ **Compressing & Adding Banner ({resolution}P)...**\n\n"
                                 f"[{bar}] **{percent}%**"
                             )
                         except Exception:
@@ -352,14 +413,10 @@ async def process_compression(client, callback_query):
             await status_msg.edit("📤 **Uploading compressed video...**")
             
             compressed_size = os.path.getsize(output_file)
-            
             orig_mb = original_size / (1024 * 1024) if original_size > 0 else 0
             comp_mb = compressed_size / (1024 * 1024)
             
-            if original_size > 0 and compressed_size < original_size:
-                saved_percent = int((1 - (compressed_size / original_size)) * 100)
-            else:
-                saved_percent = 0
+            saved_percent = int((1 - (compressed_size / original_size)) * 100) if original_size > 0 and compressed_size < original_size else 0
             
             thumb_path = None
             try:
@@ -368,13 +425,12 @@ async def process_compression(client, callback_query):
             except Exception:
                 pass
             
-            # Safe caption truncation to completely prevent separator/chunk limit errors
             original_caption = msg.caption or ""
             if len(original_caption) > 300:
                 original_caption = original_caption[:300] + "..."
 
             final_caption = (
-                f"✅ **Compressed to {resolution}P!**\n"
+                f"✅ **Compressed & Banner Added ({resolution}P)!**\n"
                 f"📉 **Size Reduced:** `{saved_percent}%` (`{orig_mb:.2f} MB` ➔ `{comp_mb:.2f} MB`)\n\n"
                 f"{original_caption}\n\n"
                 f"👑 **Developer:** @kage_x_edit"
