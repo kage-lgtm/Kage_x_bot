@@ -115,7 +115,7 @@ async def back_to_menu(client, callback_query):
         reply_markup=menu_keyboard
     )
 
-# 📥 SAVE RESTRICTED CONTENT HANDLER (WITH LIVE DOWNLOAD PERCENTAGE & 16:9 FIX)
+# 📥 SAVE RESTRICTED CONTENT HANDLER
 @app.on_message(filters.regex(r"https?://t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)") & filters.private)
 async def restricted_link_handler(client, message):
     link = message.text.strip()
@@ -176,7 +176,7 @@ async def restricted_link_handler(client, message):
                     duration=target_msg.video.duration,
                     width=target_msg.video.width,
                     height=target_msg.video.height,
-                    supports_streaming=True, # 16:9 Widescreen aspect ratio fix
+                    supports_streaming=True,
                     caption=target_msg.caption or ""
                 )
                 
@@ -198,9 +198,9 @@ async def restricted_link_handler(client, message):
         await progress_msg.delete()
         
     except Exception as e:
-        await progress_msg.edit(f"❌ Error aagaya bhai: `{str(e)}`\n\nMake sure userbot is joined or added to that channel/group!")
+        await progress_msg.edit(f"❌ Error aagaya bhai: `{str(e)}`")
 
-# 🗜️ HANDLE INCOMING VIDEOS FOR COMPRESSION OPTIONS
+# 🗜️ HANDLE INCOMING VIDEOS
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video(client, message):
     user_id = message.from_user.id
@@ -229,7 +229,7 @@ async def receive_video(client, message):
         reply_markup=resolution_keyboard
     )
 
-# 🔄 PROCESS COMPRESSION WITH LIVE PROGRESS BAR & TIMEOUT PROTECTION
+# 🔄 PROCESS COMPRESSION WITH FIXED ASPECT RATIO & THUMBNAIL
 @app.on_callback_query(filters.regex(r"^comp_"))
 async def process_compression(client, callback_query):
     user_id = callback_query.from_user.id
@@ -241,7 +241,7 @@ async def process_compression(client, callback_query):
     resolution = "480" if "480p" in data else ("540" if "540p" in data else "720")
     
     msg = USER_VIDEOS[user_id]
-    duration = getattr(msg.video, "duration", 0) if msg.video else 0
+    duration = getattr(msg.video, "duration", 0) if (msg.video and hasattr(msg.video, "duration")) else 0
     
     status_msg = await callback_query.message.edit_text(f"🔄 **Downloading video for compression ({resolution}P)...**")
     
@@ -250,14 +250,18 @@ async def process_compression(client, callback_query):
     
     try:
         downloaded_path = await msg.download(file_name=input_file)
+        
+        # Accurate original file size check before compression
+        original_size = os.path.getsize(downloaded_path) if os.path.exists(downloaded_path) else 0
+        
         await status_msg.edit(f"🗜️ **Compressing video to {resolution}P...**")
         
         if resolution == "480":
-            scale_filter = "scale=-2:480"
+            scale_filter = "scale=-2:480:flags=lanczos"
         elif resolution == "540":
-            scale_filter = "scale=960:540"
+            scale_filter = "scale=960:540:flags=lanczos"
         else:
-            scale_filter = "scale=-2:720"
+            scale_filter = "scale=-2:720:flags=lanczos"
             
         command = [
             FFMPEG_PATH, "-i", downloaded_path,
@@ -305,9 +309,7 @@ async def process_compression(client, callback_query):
         if os.path.exists(output_file):
             await status_msg.edit("📤 **Uploading compressed video...**")
             
-            # Safe size calculation
-            original_size = os.path.getsize(input_file) if os.path.exists(input_file) else 0
-            compressed_size = os.path.getsize(output_file) if os.path.exists(output_file) else 0
+            compressed_size = os.path.getsize(output_file)
             
             orig_mb = original_size / (1024 * 1024)
             comp_mb = compressed_size / (1024 * 1024)
@@ -317,14 +319,14 @@ async def process_compression(client, callback_query):
             else:
                 saved_percent = 0
             
+            # Thumbnail/Banner extract ya download karna
             thumb_path = None
-            if msg.video and msg.video.thumbs:
-                try:
+            try:
+                if msg.video and msg.video.thumbs:
                     thumb_path = await client.download_media(msg.video.thumbs[0].file_id)
-                except Exception:
-                    pass
+            except Exception:
+                pass
             
-            # Custom caption keeping original caption and adding compression stats
             original_caption = msg.caption or ""
             final_caption = (
                 f"✅ **Compressed to {resolution}P!**\n"
@@ -333,7 +335,6 @@ async def process_compression(client, callback_query):
                 f"👑 **Developer:** @kage_x_edit"
             )
             
-            # Upload with timeout protection (5 minutes limit)
             try:
                 await asyncio.wait_for(
                     client.send_video(
@@ -346,7 +347,7 @@ async def process_compression(client, callback_query):
                     timeout=300
                 )
             except asyncio.TimeoutError:
-                await status_msg.edit("❌ **Upload timed out!** File size bohot badi hai ya server slow hai.")
+                await status_msg.edit("❌ **Upload timed out!**")
                 return
             
             if thumb_path and os.path.exists(thumb_path):
