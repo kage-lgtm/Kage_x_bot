@@ -57,34 +57,28 @@ WAITING_FOR_FILENAME = set()
 USER_SETTING_BANNER = set()
 USER_BANNERS = {}
 
-# Simple Token Verification Database Storage (In-memory dict for users validity)
-USER_TOKENS = {} # {user_id: expiry_timestamp}
-
-# ShrinkMe.io Configuration
-SHRINKME_API_TOKEN = os.environ.get("SHRINKME_API", "YOUR_SHRINKME_API_KEY")
-SHRINKME_ALIAS = os.environ.get("SHRINKME_ALIAS", "shrinkme.io")
-
-def check_user_token(user_id):
-    if user_id in ADMINS:
-        return True
-    expiry = USER_TOKENS.get(user_id, 0)
-    return time.time() < expiry
-
 @app.on_message(filters.command("start"))
 async def start_command(client, message):
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
 
-    # Check if user clicked token verification link
-    if len(message.command) > 1 and message.command[1].startswith("verify_"):
-        # Give 24 hours validity upon successful token verification
-        USER_TOKENS[user_id] = time.time() + 86400
-        await message.reply_text(
-            "🎉 **Verification Successful!**\n\n"
-            "Aapka 24 hours ke liye token activate ho gaya hai. Ab aap saari files aur features bina ad ke use kar sakte hain!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Open Main Menu", callback_data="back_to_menu")]])
-        )
-        return
+    # Handle start with secure protected link parameter
+    if len(message.command) > 1 and message.command[1].startswith("secure_"):
+        token = message.command[1].replace("secure_", "")
+        try:
+            decoded_bytes = base64.urlsafe_b64decode(token.encode("utf-8"))
+            original_link = decoded_bytes.decode("utf-8")
+            
+            await message.reply_text(
+                f"✅ **Protected Link Unlocked Successfully!**\n\n"
+                f"Aapka original link yeh raha:\n"
+                f"🔗 {original_link}\n\n"
+                f"Ab aap isse access kar sakte hain."
+            )
+            return
+        except Exception:
+            await message.reply_text("❌ **Invalid or Expired Protected Link!**")
+            return
 
     menu_keyboard = InlineKeyboardMarkup([
         [
@@ -96,7 +90,7 @@ async def start_command(client, message):
             InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")
         ],
         [
-            InlineKeyboardButton("🔑 Get Token (Ad Link)", callback_data="get_token_menu"),
+            InlineKeyboardButton("🔐 Link Protector", callback_data="protector_menu"),
             InlineKeyboardButton("💎 Premium", callback_data="premium")
         ]
     ])
@@ -105,60 +99,12 @@ async def start_command(client, message):
         f"👋 **Hello {username}!**\n\n"
         f"Welcome to **Kage x Bot** 🚀\n"
         f"👑 **Developer:** @kage_x_edit\n\n"
-        f"Neeche diye gaye buttons se features explore karein:",
+        f"Aap yahan files rename karne ke sath-sath **Link Protector (`/protect`)** ka use bhi kar sakte hain!",
         reply_markup=menu_keyboard
-    )
-
-@app.on_callback_query(filters.regex("get_token_menu"))
-async def get_token_menu(client, callback_query):
-    user_id = callback_query.from_user.id
-    bot_username = (await client.get_me()).username
-    
-    # Generate verification target link back to bot
-    verify_target = f"https://t.me/{bot_username}?start=verify_{user_id}"
-    
-    # Generate ShrinkMe short link using API
-    import urllib.request
-    import json
-    
-    short_url = verify_target
-    try:
-        api_req_url = f"https://{SHRINKME_ALIAS}/api?api={SHRINKME_API_TOKEN}&url={urllib.parse.quote(verify_target)}"
-        req = urllib.request.urlopen(api_req_url, timeout=5)
-        res = json.loads(req.read().decode('utf-8'))
-        if res.get("status") == "success":
-            short_url = res.get("shortenedUrl")
-    except Exception:
-        pass
-
-    token_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔗 Click Here to Complete Ad & Get Token", url=short_url)],
-        [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]
-    ])
-    
-    await callback_query.message.edit_text(
-        "🔑 **Token Verification System**\n\n"
-        "Files download karne ya rename karne ke liye aapko ek chota sa ad dekhna hoga.\n\n"
-        "1. Neeche diye gaye button par click karein.\n"
-        "2. Ad page complete karein.\n"
-        "3. Aapko turant 24 hours ke liye access mil jayega!",
-        reply_markup=token_keyboard
     )
 
 @app.on_callback_query(filters.regex("compress_menu"))
 async def compress_menu(client, callback_query):
-    user_id = callback_query.from_user.id
-    if not check_user_token(user_id):
-        await callback_query.message.edit_text(
-            "⚠️️ **Token Expired!**\n\n"
-            "Is feature ko use karne ke liye pehle apna token verify karein.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔑 Get Token Now", callback_data="get_token_menu")],
-                [InlineKeyboardButton("⬅ Back to Menu", callback_data="back_to_menu")]
-            ])
-        )
-        return
-
     await callback_query.message.edit_text(
         "🗜 **Video Renamer & Watermark Studio**\n"
         "👑 **Developer:** @kage_x_edit\n\n"
@@ -188,6 +134,20 @@ async def set_banner_menu(client, callback_query):
         ])
     )
 
+@app.on_callback_query(filters.regex("protector_menu"))
+async def protector_menu(client, callback_query):
+    await callback_query.message.edit_text(
+        "🔐 **Protected Link Generator (LkProtector)**\n"
+        "👑 **Developer:** @kage_x_edit\n\n"
+        "Kisi bhi link ko secure protect karne ke liye is format mein command bhejein:\n"
+        "`/protect <tumhara_link>`\n\n"
+        "Example:\n"
+        "`/protect https://t.me/+G1ca0WgdltQyZjU1`",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]
+        ])
+    )
+
 @app.on_callback_query(filters.regex("back_to_menu"))
 async def back_to_menu(client, callback_query):
     user_id = callback_query.from_user.id
@@ -206,7 +166,7 @@ async def back_to_menu(client, callback_query):
             InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")
         ],
         [
-            InlineKeyboardButton("🔑 Get Token (Ad Link)", callback_data="get_token_menu"),
+            InlineKeyboardButton("🔐 Link Protector", callback_data="protector_menu"),
             InlineKeyboardButton("💎 Premium", callback_data="premium")
         ]
     ])
@@ -217,20 +177,37 @@ async def back_to_menu(client, callback_query):
         reply_markup=menu_keyboard
     )
 
-# 📥 SAVE RESTRICTED CONTENT HANDLER WITH TOKEN CHECK
-@app.on_message(filters.regex(r"https?://t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)") & filters.private)
-async def restricted_link_handler(client, message):
-    user_id = message.from_user.id
-    if not check_user_token(user_id):
+# 🔐 PROTECTED LINK GENERATOR COMMAND (/protect)
+@app.on_message(filters.command("protect") & filters.private)
+async def protect_link_command(client, message):
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
         await message.reply_text(
-            "⚠️ **Token Required!**\n\n"
-            "Restricted content download karne ke liye pehle apna token verify karein.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔑 Get Token Now", callback_data="get_token_menu")]
-            ])
+            "⚠️ **Invalid Format!**\n\n"
+            "Sahi tarika:\n`/protect <tumhara_link>`"
         )
         return
 
+    raw_link = args[1].strip()
+    
+    # Encode link securely using Base64
+    encoded_bytes = base64.urlsafe_b64encode(raw_link.encode("utf-8"))
+    encoded_str = encoded_bytes.decode("utf-8")
+    
+    bot_username = (await client.get_me()).username
+    protected_url = f"https://t.me/{bot_username}?start=secure_{encoded_str}"
+    
+    response_text = (
+        f"🔐 **Protected Link:**\n"
+        f"`{protected_url}`\n\n"
+        f"✨ *Yeh link fully protected hai, user start karega tabhi original link access kar payega!*"
+    )
+    
+    await message.reply_text(response_text)
+
+# 📥 SAVE RESTRICTED CONTENT HANDLER
+@app.on_message(filters.regex(r"https?://t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)") & filters.private)
+async def restricted_link_handler(client, message):
     link = message.text.strip()
     match = re.search(r"t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)", link)
     if not match:
@@ -322,16 +299,6 @@ async def receive_photo(client, message):
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video(client, message):
     user_id = message.from_user.id
-    if not check_user_token(user_id):
-        await message.reply_text(
-            "⚠️ **Token Required!**\n\n"
-            "Video rename aur watermark add karne ke liye pehle apna token verify karein.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔑 Get Token Now", callback_data="get_token_menu")]
-            ])
-        )
-        return
-
     if message.document and not message.document.mime_type.startswith("video"):
         return
 
