@@ -52,6 +52,7 @@ supabase: SupabaseClient = create_client(SUPABASE_URL, SUPABASE_KEY)
 # Temporary storage & states
 USER_VIDEOS = {}
 USER_SETTING_BANNER = set()
+USER_BANNERS = {}
 
 @app.on_message(filters.command("start"))
 async def start_command(client, message):
@@ -88,9 +89,9 @@ async def start_command(client, message):
 @app.on_callback_query(filters.regex("compress_menu"))
 async def compress_menu(client, callback_query):
     await callback_query.message.edit_text(
-        "🗜️ **Video Watermark / Compressor Studio**\n"
+        "🗜️ **Video Watermark / Studio**\n"
         "👑 **Developer:** @kage_x_edit\n\n"
-        "Bhai, apni video yahan direct bhej do. Banner lagane ke liye options mil jayenge!",
+        "Bhai, apni video yahan direct bhej do. Banner lagane ke options mil jayenge!",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🖼️ Set Custom Banner", callback_data="set_banner_menu")],
             [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]
@@ -102,7 +103,7 @@ async def set_banner_menu(client, callback_query):
     user_id = callback_query.from_user.id
     USER_SETTING_BANNER.add(user_id)
     
-    banner_path = f"banner_{user_id}.png"
+    banner_path = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
     has_banner = os.path.exists(banner_path)
     
     status_text = "🟢 **Aapka current banner pehle se saved hai!** (Naya bhejne par update ho jayega)" if has_banner else "🔴 **Abhi koi banner saved nahi hai.**"
@@ -227,7 +228,8 @@ async def receive_media(client, message):
     if message.photo and user_id in USER_SETTING_BANNER:
         USER_SETTING_BANNER.remove(user_id)
         banner_path = f"banner_{user_id}.png"
-        await message.download(file_name=banner_path)
+        downloaded_banner = await message.download(file_name=banner_path)
+        USER_BANNERS[user_id] = downloaded_banner or banner_path
         
         menu_keyboard = InlineKeyboardMarkup([
             [
@@ -252,13 +254,13 @@ async def receive_media(client, message):
     if message.video or message.document:
         USER_VIDEOS[user_id] = message
         
-        banner_path = f"banner_{user_id}.png"
+        banner_path = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
         has_banner = os.path.exists(banner_path)
         banner_status = "🟢 Custom Banner Detected" if has_banner else "🔴 No Banner Set (Click 'Set Custom Banner')"
         
         options_keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("⚡ Original Quality (Bina Compress kiye Banner lagaye)", callback_data="comp_original")
+                InlineKeyboardButton("⚡ Original Quality (Banner ke sath)", callback_data="comp_original")
             ],
             [
                 InlineKeyboardButton("📱 480P", callback_data="comp_480p"),
@@ -276,7 +278,7 @@ async def receive_media(client, message):
         await message.reply_text(
             f"🎬 **Video mil gayi bhai!**\n"
             f"Status: `{banner_status}`\n\n"
-            f"Select option (Original Quality choose karne par video compress nahi hogi, sirf banner lag jayega):",
+            f"Select option:",
             reply_markup=options_keyboard
         )
 
@@ -304,7 +306,7 @@ async def process_compression(client, callback_query):
     
     input_file = f"input_{user_id}.mp4"
     output_file = f"output_{user_id}.mp4"
-    banner_file = f"banner_{user_id}.png"
+    banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
     
     try:
         last_dl_time = [0]
@@ -346,8 +348,8 @@ async def process_compression(client, callback_query):
         has_banner = os.path.exists(banner_file)
         
         if is_original:
-            # Bina resolution change kiye sirf original size par banner overlay karega high quality (crf 18) ke sath
             if has_banner:
+                # Original resolution par high quality (crf 18) ke sath banner overlay karega
                 filter_complex = f"[1:v]scale=-1:60[banner];[0:v][banner]overlay=W-w-15:15[v]"
                 command = [
                     FFMPEG_PATH, "-i", downloaded_path, "-i", banner_file,
@@ -358,7 +360,6 @@ async def process_compression(client, callback_query):
                     output_file, "-y"
                 ]
             else:
-                # Agar banner nahi hai toh simply copy kar dega bina loss ke
                 command = [
                     FFMPEG_PATH, "-i", downloaded_path,
                     "-c", "copy",
