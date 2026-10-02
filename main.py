@@ -10,6 +10,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait
 from supabase import create_client, Client as SupabaseClient
 import imageio_ffmpeg
+import subprocess
 
 # Credentials & Supabase Config
 API_ID = int(os.environ.get("API_ID", 38215355))
@@ -229,7 +230,19 @@ async def receive_video(client, message):
         reply_markup=resolution_keyboard
     )
 
-# 🔄 PROCESS COMPRESSION WITH FIXED SIZE & ERROR HANDLING
+def get_video_duration(file_path):
+    try:
+        cmd = [FFMPEG_PATH, "-i", file_path]
+        result = subprocess.run(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        match = re.search(r"Duration: (\d{2}):(\d{2}):(\d{2}\.\d{2})", result.stderr)
+        if match:
+            hrs, mins, secs = map(float, match.groups())
+            return hrs * 3600 + mins * 60 + secs
+    except Exception:
+        pass
+    return 0
+
+# 🔄 PROCESS COMPRESSION WITH FIXED CAPTION SPLIT ERROR
 @app.on_callback_query(filters.regex(r"^comp_"))
 async def process_compression(client, callback_query):
     user_id = callback_query.from_user.id
@@ -241,9 +254,7 @@ async def process_compression(client, callback_query):
     resolution = "480" if "480p" in data else ("540" if "540p" in data else "720")
     
     msg = USER_VIDEOS[user_id]
-    duration = getattr(msg.video, "duration", 0) if (msg.video and hasattr(msg.video, "duration")) else 0
     
-    # Safe original size extraction from telegram message object directly
     original_size = 0
     if msg.video and hasattr(msg.video, "file_size"):
         original_size = msg.video.file_size
@@ -256,13 +267,30 @@ async def process_compression(client, callback_query):
     output_file = f"output_{user_id}.mp4"
     
     try:
-        downloaded_path = await msg.download(file_name=input_file)
+        last_dl_time = [0]
+        async def dl_progress(current, total):
+            if total > 0:
+                now = time.time()
+                if now - last_dl_time[0] > 2 or current == total:
+                    last_dl_time[0] = now
+                    pct = int(current * 100 / total)
+                    pct = max(0, min(100, pct))
+                    try:
+                        await status_msg.edit(
+                            f"📥 **Downloading video ({pct}%)...**\n"
+                            f"📊 `{current / (1024*1024):.2f} MB` / `{total / (1024*1024):.2f} MB`"
+                        )
+                    except Exception:
+                        pass
+
+        downloaded_path = await msg.download(file_name=input_file, progress=dl_progress)
         
-        # Fallback to local file size if telegram size was 0
         if original_size == 0 and os.path.exists(downloaded_path):
             original_size = os.path.getsize(downloaded_path)
         
-        await status_msg.edit(f"🗜️ **Compressing video to {resolution}P with padding...**")
+        await status_msg.edit(f"🗜️ **Analyzing & Compressing video to {resolution}P...**")
+        
+        duration = get_video_duration(downloaded_path)
         
         if resolution == "480":
             scale_filter = "scale=trunc(oh*a/2)*2:480,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
@@ -286,31 +314,37 @@ async def process_compression(client, callback_query):
         )
         
         last_percent = -1
-        
+        buffer = b""
         while True:
-            line = await process.stderr.readline()
-            if not line:
+            chunk = await process.stderr.read(1024)
+            if not chunk:
                 break
-            line_str = line.decode('utf-8', errors='ignore')
-            
-            time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2}\.\d{2})", line_str)
-            if time_match and duration > 0:
-                hrs, mins, secs = map(float, time_match.groups())
-                current_seconds = hrs * 3600 + mins * 60 + secs
-                percent = int((current_seconds / duration) * 100)
-                percent = max(0, min(100, percent))
+            buffer += chunk
+            while b"\n" in buffer or b"\r" in buffer:
+                if b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                else:
+                    line, buffer = buffer.split(b"\r", 1)
                 
-                if percent >= last_percent + 10:
-                    last_percent = percent
-                    filled_blocks = int(percent / 10)
-                    bar = "█" * filled_blocks + "░" * (10 - filled_blocks)
-                    try:
-                        await status_msg.edit(
-                            f"🗜️ **Compressing to {resolution}P...**\n\n"
-                            f"[{bar}] **{percent}%**"
-                        )
-                    except Exception:
-                        pass
+                line_str = line.decode('utf-8', errors='ignore')
+                time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2}\.\d{2})", line_str)
+                if time_match and duration > 0:
+                    hrs, mins, secs = map(float, time_match.groups())
+                    current_seconds = hrs * 3600 + mins * 60 + secs
+                    percent = int((current_seconds / duration) * 100)
+                    percent = max(0, min(100, percent))
+                    
+                    if percent != last_percent and percent % 5 == 0:
+                        last_percent = percent
+                        filled_blocks = int(percent / 10)
+                        bar = "█" * filled_blocks + "░" * (10 - filled_blocks)
+                        try:
+                            await status_msg.edit(
+                                f"🗜️ **Compressing to {resolution}P...**\n\n"
+                                f"[{bar}] **{percent}%**"
+                            )
+                        except Exception:
+                            pass
 
         await process.wait()
         
@@ -327,7 +361,6 @@ async def process_compression(client, callback_query):
             else:
                 saved_percent = 0
             
-            # Thumbnail/Banner extract ya download karna
             thumb_path = None
             try:
                 if msg.video and msg.video.thumbs:
@@ -335,10 +368,10 @@ async def process_compression(client, callback_query):
             except Exception:
                 pass
             
+            # Safe caption truncation to completely prevent separator/chunk limit errors
             original_caption = msg.caption or ""
-            # Safe truncation of caption if too long to prevent limit error
-            if len(original_caption) > 500:
-                original_caption = original_caption[:500] + "..."
+            if len(original_caption) > 300:
+                original_caption = original_caption[:300] + "..."
 
             final_caption = (
                 f"✅ **Compressed to {resolution}P!**\n"
@@ -369,8 +402,8 @@ async def process_compression(client, callback_query):
         else:
             await status_msg.edit("❌ Compression fail ho gaya bhai!")
             
-    except Exception as e:
-        await status_msg.edit(f"❌ Error: `{str(e)}`")
+    except Exception as _err:
+        await status_msg.edit(f"❌ Error: `{str(_err)}`")
         
     finally:
         if os.path.exists(input_file):
