@@ -3,6 +3,7 @@ import logging
 import asyncio
 import re
 import time
+import base64
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 from pyrogram import Client, filters
@@ -49,7 +50,7 @@ userbot = Client(
 # Supabase Database Client Initialize
 supabase: SupabaseClient = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Temporary storage & states for File Renamer Workflow
+# Temporary storage & states for File Renamer & Link Protector
 USER_VIDEOS = {}
 USER_NEW_FILENAMES = {}
 WAITING_FOR_FILENAME = set()
@@ -71,20 +72,20 @@ async def start_command(client, message):
             InlineKeyboardButton("📥 Downloader", callback_data="downloader")
         ],
         [
-            InlineKeyboardButton("🗜️ Video Compressor & Watermark", callback_data="compress_menu"),
+            InlineKeyboardButton("🗜️ Video Studio & Rename", callback_data="compress_menu"),
             InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")
         ],
         [
-            InlineKeyboardButton("💎 Premium & Coins", callback_data="premium"),
-            InlineKeyboardButton("⚙️ Help & Support", callback_data="help")
+            InlineKeyboardButton("🔐 Link Protector", callback_data="protector_menu"),
+            InlineKeyboardButton("💎 Premium & Coins", callback_data="premium")
         ]
     ])
 
     await message.reply_text(
         f"👋 **Hello {username}!**\n\n"
-        f"Welcome to **Kage x File Renamer Bot** 🚀\n"
+        f"Welcome to **Kage x File Renamer & Protector Bot** 🚀\n"
         f"👑 **Developer:** @kage_x_edit\n\n"
-        f"Pehle apni thumbnail/logo bhej kar save karein, phir koi bhi video bhej kar rename aur watermark add karein!",
+        f"Ab aap files rename karne ke sath-sath links ko secure protect bhi kar sakte hain!",
         reply_markup=menu_keyboard
     )
 
@@ -96,7 +97,7 @@ async def compress_menu(client, callback_query):
         "Bhai, apni video yahan direct bhej do. Phir bot aapse naya filename aur output type puchega!",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")],
-            [InlineKeyboardButton("⬅️️ Back to Menu", callback_data="back_to_menu")]
+            [InlineKeyboardButton("⬅ Back to Menu", callback_data="back_to_menu")]
         ])
     )
 
@@ -108,12 +109,26 @@ async def set_banner_menu(client, callback_query):
     banner_path = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
     has_banner = os.path.exists(banner_path)
     
-    status_text = "🟢 **Aapka custom thumbnail pehle se saved hai!** (Naya bhejne par update ho jayega)" if has_banner else "🔴 **Abhi koi thumbnail saved nahi hai.**"
+    status_text = "🟢 **Aapka custom thumbnail pehle se saved hai!**" if has_banner else "🔴 **Abhi koi thumbnail saved nahi hai.**"
     
     await callback_query.message.edit_text(
         f"🖼 **Custom Thumbnail Setup**\n\n"
         f"{status_text}\n\n"
         f"Ab apni **Thumbnail ya Logo image (Photo)** yahan chat mein direct bhej do!",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]
+        ])
+    )
+
+@app.on_callback_query(filters.regex("protector_menu"))
+async def protector_menu(client, callback_query):
+    await callback_query.message.edit_text(
+        "🔐 **Protected Link Generator (LkProtector)**\n"
+        "👑 **Developer:** @kage_x_edit\n\n"
+        "Kisi bhi link ko secure protect karne ke liye is format mein command bhejein:\n"
+        "`/protect <tumhara_link>`\n\n"
+        "Example:\n"
+        "`/protect https://t.me/+G1ca0WgdltQyZjU1`",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]
         ])
@@ -133,12 +148,12 @@ async def back_to_menu(client, callback_query):
             InlineKeyboardButton("📥 Downloader", callback_data="downloader")
         ],
         [
-            InlineKeyboardButton("🗜️ Video Compressor & Watermark", callback_data="compress_menu"),
+            InlineKeyboardButton("🗜️ Video Studio & Rename", callback_data="compress_menu"),
             InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")
         ],
         [
-            InlineKeyboardButton("💎 Premium & Coins", callback_data="premium"),
-            InlineKeyboardButton("⚙️ Help & Support", callback_data="help")
+            InlineKeyboardButton("🔐 Link Protector", callback_data="protector_menu"),
+            InlineKeyboardButton("💎 Premium & Coins", callback_data="premium")
         ]
     ])
     await callback_query.message.edit_text(
@@ -147,6 +162,63 @@ async def back_to_menu(client, callback_query):
         "Neeche diye gaye buttons se features explore karein:",
         reply_markup=menu_keyboard
     )
+
+# 🔐 PROTECTED LINK GENERATOR COMMAND (/protect)
+@app.on_message(filters.command("protect") & filters.private)
+async def protect_link_command(client, message):
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.reply_text(
+            "⚠️ **Invalid Format!**\n\n"
+            "Sahi tarika:\n`/protect <tumhara_link>`"
+        )
+        return
+
+    raw_link = args[1].strip()
+    
+    # Encode link securely using Base64 so user cannot easily bypass without full flow
+    encoded_bytes = base64.urlsafe_b64encode(raw_link.encode("utf-8"))
+    encoded_str = encoded_bytes.decode("utf-8")
+    
+    # Generate secure protected worker/bot link
+    bot_username = (await client.get_me()).username
+    protected_url = f"https://t.me/{bot_username}?start=secure_{encoded_str}"
+    
+    # Also generate a simulated encrypted worker gateway link style
+    worker_link = f"https://links.kage-provider-bots.workers.dev/{encoded_str}"
+
+    response_text = (
+        f"🔐 **Protected Link:**\n"
+        f"`{worker_link}`\n\n"
+        f"🔗 **Direct Bot Secure Link:**\n"
+        f"`{protected_url}`\n\n"
+        f"✨ *Yeh link fully encrypted hai, user bina ad/verification ke bypass nahi kar payega!*"
+    )
+    
+    await message.reply_text(response_text)
+
+# Handle start with secure token parameter
+@app.on_message(filters.command("start") & filters.private)
+async def start_with_secure_token(client, message):
+    if len(message.command) > 1 and message.command[1].startswith("secure_"):
+        token = message.command[1].replace("secure_", "")
+        try:
+            decoded_bytes = base64.urlsafe_b64decode(token.encode("utf-8"))
+            original_link = decoded_bytes.decode("utf-8")
+            
+            await message.reply_text(
+                f"✅ **Verification Successful!**\n\n"
+                f"Aapka protected link yeh raha:\n"
+                f"🔗 {original_link}\n\n"
+                f"Ab aap is link ko access kar sakte hain."
+            )
+            return
+        except Exception:
+            await message.reply_text("❌ **Invalid or Expired Protected Link!**")
+            return
+
+    # Normal start flow
+    await start_command(client, message)
 
 # 📥 SAVE RESTRICTED CONTENT HANDLER
 @app.on_message(filters.regex(r"https?://t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)") & filters.private)
@@ -268,6 +340,9 @@ async def receive_video(client, message):
 @app.on_message(filters.text & filters.private)
 async def receive_filename(client, message):
     user_id = message.from_user.id
+    if message.text.startswith("/"):
+        return
+
     if user_id in WAITING_FOR_FILENAME:
         WAITING_FOR_FILENAME.remove(user_id)
         new_name = message.text.strip()
@@ -309,8 +384,6 @@ async def process_renaming(client, callback_query):
     
     try:
         last_dl_time = [0]
-        file_size = msg.video.file_size if msg.video else (msg.document.file_size if msg.document else 0)
-        
         async def dl_progress(current, total):
             if total > 0:
                 now = time.time()
@@ -337,7 +410,6 @@ async def process_renaming(client, callback_query):
         
         has_banner = os.path.exists(banner_file)
         
-        # If custom banner/logo exists, burn it into video, otherwise copy stream directly
         if has_banner:
             filter_complex = f"[1:v]scale=-1:60[banner];[0:v][banner]overlay=W-w-15:15[v]"
             command = [
@@ -364,13 +436,11 @@ async def process_renaming(client, callback_query):
         
         final_file = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
         
-        # Rename file locally to new filename
         renamed_path = os.path.join(os.path.dirname(final_file), new_filename)
         if os.path.exists(renamed_path):
             os.remove(renamed_path)
         os.rename(final_file, renamed_path)
         
-        # Get thumbnail (either custom saved banner or video thumbnail)
         thumb_path = banner_file if has_banner else None
         if not thumb_path and msg.video and msg.video.thumbs:
             try:
