@@ -88,9 +88,9 @@ async def start_command(client, message):
 @app.on_callback_query(filters.regex("compress_menu"))
 async def compress_menu(client, callback_query):
     await callback_query.message.edit_text(
-        "🗜️ **Video Compressor Studio**\n"
+        "🗜️ **Video Watermark / Compressor Studio**\n"
         "👑 **Developer:** @kage_x_edit\n\n"
-        "Bhai, apni video yahan direct bhej do. Pehle apna custom banner set zaroor kar lena!",
+        "Bhai, apni video yahan direct bhej do. Banner lagane ke liye options mil jayenge!",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🖼️ Set Custom Banner", callback_data="set_banner_menu")],
             [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]
@@ -103,12 +103,12 @@ async def set_banner_menu(client, callback_query):
     USER_SETTING_BANNER.add(user_id)
     
     banner_path = f"banner_{user_id}.png"
-    has_banner = os.paths.exists(banner_path) if hasattr(os, "paths") else os.path.exists(banner_path)
+    has_banner = os.path.exists(banner_path)
     
     status_text = "🟢 **Aapka current banner pehle se saved hai!** (Naya bhejne par update ho jayega)" if has_banner else "🔴 **Abhi koi banner saved nahi hai.**"
     
     await callback_query.message.edit_text(
-        f"🖼️️ **Custom Banner Setup**\n\n"
+        f"🖼 **Custom Banner Setup**\n\n"
         f"{status_text}\n\n"
         f"Ab apni **Logo ya Banner image (Photo)** yahan chat mein direct bhej do!",
         reply_markup=InlineKeyboardMarkup([
@@ -153,7 +153,6 @@ async def restricted_link_handler(client, message):
         
     chat_identifier = match.group(1)
     msg_id = int(match.group(2))
-    
     chat_id = int("-100" + chat_identifier) if chat_identifier.isdigit() else "@" + chat_identifier
         
     progress_msg = await message.reply_text("📥 **Fetching restricted content...**")
@@ -249,7 +248,7 @@ async def receive_media(client, message):
     if message.document and not message.document.mime_type.startswith("video"):
         return
 
-    # 2. Handle incoming video for compression
+    # 2. Handle incoming video
     if message.video or message.document:
         USER_VIDEOS[user_id] = message
         
@@ -257,13 +256,16 @@ async def receive_media(client, message):
         has_banner = os.path.exists(banner_path)
         banner_status = "🟢 Custom Banner Detected" if has_banner else "🔴 No Banner Set (Click 'Set Custom Banner')"
         
-        resolution_keyboard = InlineKeyboardMarkup([
+        options_keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("⚡ Original Quality (Bina Compress kiye Banner lagaye)", callback_data="comp_original")
+            ],
             [
                 InlineKeyboardButton("📱 480P", callback_data="comp_480p"),
                 InlineKeyboardButton("💻 540P", callback_data="comp_540p")
             ],
             [
-                InlineKeyboardButton("🎬 720P (Original)", callback_data="comp_720p"),
+                InlineKeyboardButton("🎬 720P", callback_data="comp_720p"),
                 InlineKeyboardButton("🖼️ Change Banner", callback_data="set_banner_menu")
             ],
             [
@@ -274,11 +276,11 @@ async def receive_media(client, message):
         await message.reply_text(
             f"🎬 **Video mil gayi bhai!**\n"
             f"Status: `{banner_status}`\n\n"
-            f"Select resolution to compress:",
-            reply_markup=resolution_keyboard
+            f"Select option (Original Quality choose karne par video compress nahi hogi, sirf banner lag jayega):",
+            reply_markup=options_keyboard
         )
 
-# 🔄 PROCESS COMPRESSION WITH SAVED BANNER
+# 🔄 PROCESS BANNER & COMPRESSION/ORIGINAL
 @app.on_callback_query(filters.regex(r"^comp_"))
 async def process_compression(client, callback_query):
     user_id = callback_query.from_user.id
@@ -287,7 +289,8 @@ async def process_compression(client, callback_query):
         return
 
     data = callback_query.data
-    resolution = "480" if "480p" in data else ("540" if "540p" in data else "720")
+    is_original = "original" in data
+    resolution = "Original" if is_original else ("480" if "480p" in data else ("540" if "540p" in data else "720"))
     
     msg = USER_VIDEOS[user_id]
     
@@ -297,7 +300,7 @@ async def process_compression(client, callback_query):
     elif msg.document and hasattr(msg.document, "file_size"):
         original_size = msg.document.file_size
 
-    status_msg = await callback_query.message.edit_text(f"🔄 **Downloading video for compression ({resolution}P)...**")
+    status_msg = await callback_query.message.edit_text(f"🔄 **Downloading video (Mode: {resolution})...**")
     
     input_file = f"input_{user_id}.mp4"
     output_file = f"output_{user_id}.mp4"
@@ -325,7 +328,7 @@ async def process_compression(client, callback_query):
         if original_size == 0 and os.path.exists(downloaded_path):
             original_size = os.path.getsize(downloaded_path)
         
-        await status_msg.edit(f"🗜️ **Applying Banner & Compressing video to {resolution}P...**")
+        await status_msg.edit(f"🖼️ **Applying Banner (Mode: {resolution})...**")
         
         def get_video_duration(file_path):
             try:
@@ -342,31 +345,51 @@ async def process_compression(client, callback_query):
         duration = get_video_duration(downloaded_path)
         has_banner = os.path.exists(banner_file)
         
-        if resolution == "480":
-            base_scale = "scale=trunc(oh*a/2)*2:480,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
-        elif resolution == "540":
-            base_scale = "scale=trunc(oh*a/2)*2:540,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
+        if is_original:
+            # Bina resolution change kiye sirf original size par banner overlay karega high quality (crf 18) ke sath
+            if has_banner:
+                filter_complex = f"[1:v]scale=-1:60[banner];[0:v][banner]overlay=W-w-15:15[v]"
+                command = [
+                    FFMPEG_PATH, "-i", downloaded_path, "-i", banner_file,
+                    "-filter_complex", filter_complex,
+                    "-map", "[v]", "-map", "0:a?",
+                    "-c:v", "libx264", "-crf", "18",
+                    "-c:a", "copy",
+                    output_file, "-y"
+                ]
+            else:
+                # Agar banner nahi hai toh simply copy kar dega bina loss ke
+                command = [
+                    FFMPEG_PATH, "-i", downloaded_path,
+                    "-c", "copy",
+                    output_file, "-y"
+                ]
         else:
-            base_scale = "scale=trunc(oh*a/2)*2:720,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
+            if resolution == "480":
+                base_scale = "scale=trunc(oh*a/2)*2:480,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
+            elif resolution == "540":
+                base_scale = "scale=trunc(oh*a/2)*2:540,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
+            else:
+                base_scale = "scale=trunc(oh*a/2)*2:720,pad=iw:ih:(ow-iw)/2:(oh-ih)/2"
 
-        if has_banner:
-            filter_complex = f"[0:v]{base_scale}[scaled];[1:v]scale=-1:60[banner];[scaled][banner]overlay=W-w-15:15[v]"
-            command = [
-                FFMPEG_PATH, "-i", downloaded_path, "-i", banner_file,
-                "-filter_complex", filter_complex,
-                "-map", "[v]", "-map", "0:a?",
-                "-c:v", "libx264", "-crf", "28",
-                "-c:a", "aac", "-b:a", "128k",
-                output_file, "-y"
-            ]
-        else:
-            command = [
-                FFMPEG_PATH, "-i", downloaded_path,
-                "-vf", base_scale,
-                "-c:v", "libx264", "-crf", "28",
-                "-c:a", "aac", "-b:a", "128k",
-                output_file, "-y"
-            ]
+            if has_banner:
+                filter_complex = f"[0:v]{base_scale}[scaled];[1:v]scale=-1:60[banner];[scaled][banner]overlay=W-w-15:15[v]"
+                command = [
+                    FFMPEG_PATH, "-i", downloaded_path, "-i", banner_file,
+                    "-filter_complex", filter_complex,
+                    "-map", "[v]", "-map", "0:a?",
+                    "-c:v", "libx264", "-crf", "28",
+                    "-c:a", "aac", "-b:a", "128k",
+                    output_file, "-y"
+                ]
+            else:
+                command = [
+                    FFMPEG_PATH, "-i", downloaded_path,
+                    "-vf", base_scale,
+                    "-c:v", "libx264", "-crf", "28",
+                    "-c:a", "aac", "-b:a", "128k",
+                    output_file, "-y"
+                ]
         
         process = await asyncio.create_subprocess_exec(
             *command,
@@ -401,7 +424,7 @@ async def process_compression(client, callback_query):
                         bar = "█" * filled_blocks + "░" * (10 - filled_blocks)
                         try:
                             await status_msg.edit(
-                                f"🗜️ **Compressing & Adding Banner ({resolution}P)...**\n\n"
+                                f"🖼️ **Adding Banner (Mode: {resolution})...\n\n"
                                 f"[{bar}] **{percent}%**"
                             )
                         except Exception:
@@ -410,13 +433,11 @@ async def process_compression(client, callback_query):
         await process.wait()
         
         if os.path.exists(output_file):
-            await status_msg.edit("📤 **Uploading compressed video...**")
+            await status_msg.edit("📤 **Uploading processed video...**")
             
-            compressed_size = os.path.getsize(output_file)
+            processed_size = os.path.getsize(output_file)
             orig_mb = original_size / (1024 * 1024) if original_size > 0 else 0
-            comp_mb = compressed_size / (1024 * 1024)
-            
-            saved_percent = int((1 - (compressed_size / original_size)) * 100) if original_size > 0 and compressed_size < original_size else 0
+            proc_mb = processed_size / (1024 * 1024)
             
             thumb_path = None
             try:
@@ -430,8 +451,8 @@ async def process_compression(client, callback_query):
                 original_caption = original_caption[:300] + "..."
 
             final_caption = (
-                f"✅ **Compressed & Banner Added ({resolution}P)!**\n"
-                f"📉 **Size Reduced:** `{saved_percent}%` (`{orig_mb:.2f} MB` ➔ `{comp_mb:.2f} MB`)\n\n"
+                f"✅ **Banner Added Successfully ({resolution} Quality)!**\n"
+                f"📊 **Size:** `{proc_mb:.2f} MB` (Original: `{orig_mb:.2f} MB`)\n\n"
                 f"{original_caption}\n\n"
                 f"👑 **Developer:** @kage_x_edit"
             )
@@ -456,7 +477,7 @@ async def process_compression(client, callback_query):
                 
             await status_msg.delete()
         else:
-            await status_msg.edit("❌ Compression fail ho gaya bhai!")
+            await status_msg.edit("❌ Process fail ho gaya bhai!")
             
     except Exception as _err:
         await status_msg.edit(f"❌ Error: `{str(_err)}`")
