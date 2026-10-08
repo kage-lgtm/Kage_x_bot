@@ -62,6 +62,7 @@ WAITING_FOR_DOWNLOAD_LINK = set()
 WAITING_FOR_MAIN_EPISODE = set()
 WAITING_FOR_DUB_CLIPS = set()
 
+# Robust Persistent Storage
 DUB_STUDIO_DATA = {}
 
 def is_authorized(user_id):
@@ -137,7 +138,7 @@ async def request_access_handler(client, callback_query):
     username = callback_query.from_user.username or callback_query.from_user.first_name
     
     await callback_query.answer("✅ Request main owner ke paas bhej di gayi hai!", show_alert=True)
-    await callback_query.message.edit_text("⏳ **Request Sent!** Owner ki approval ka intezaار karein.")
+    await callback_query.message.edit_text("⏳ **Request Sent!** Owner ki approval ka intezaar karein.")
     
     try:
         await client.send_message(
@@ -486,7 +487,7 @@ async def receive_video_handler(client, message):
         status_msg = await message.reply_text("📥 **Downloading Main Episode & muting original audio...**")
         
         input_path = f"main_ep_{user_id}.mp4"
-        muted_path = f"muted_ep_{user_id}.mp4"
+        muted_path = os.path.abspath(f"muted_ep_{user_id}.mp4")
         
         try:
             await message.download(file_name=input_path)
@@ -507,7 +508,7 @@ async def receive_video_handler(client, message):
             
             await status_msg.edit(
                 "✅ **Main Episode Muted Successfully!**\n\n"
-                "Ab apni **saari Dubbed Clips ek sath (multiple select karke)** yahan bhej do aur bhejne ke baad niche button dabao:",
+                "Ab apni **saari Dubbed Clips ek sath** yahan bhej do aur bhejne ke baad niche button dabao:",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🚀 Mix & Process Dubbed Episode", callback_data="process_dub_final")],
                     [InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")]
@@ -517,14 +518,18 @@ async def receive_video_handler(client, message):
             await status_msg.edit(f"❌ Error: `{str(e)}`")
         return
 
-    # Step 2: Receiving Dubbed Clips (User can send multiple clips)
+    # Step 2: Receiving Dubbed Clips safely
     if user_id in WAITING_FOR_DUB_CLIPS:
-        clip_path = await message.download(file_name=f"clip_{user_id}_{int(time.time())}_{len(DUB_STUDIO_DATA[user_id]['clips'])}.mp4")
+        if user_id not in DUB_STUDIO_DATA:
+            DUB_STUDIO_DATA[user_id] = {"episode": None, "clips": []}
+            
+        clip_path = os.path.abspath(f"clip_{user_id}_{int(time.time())}_{len(DUB_STUDIO_DATA[user_id]['clips'])}.mp4")
+        await message.download(file_name=clip_path)
         DUB_STUDIO_DATA[user_id]["clips"].append(clip_path)
         count = len(DUB_STUDIO_DATA[user_id]["clips"])
         
         await message.reply_text(
-            f"✅ **Dubbed Clip #{count} Added!**\n"
+            f"✅ **Dubbed Clip #{count} Added Successfully!**\n"
             f"Agar aur clips hain toh bhejte jao, warna niche mix button par click karo:",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton(f"🚀 Mix & Process Dubbed Episode ({count} Clips)", callback_data="process_dub_final")],
@@ -561,7 +566,7 @@ async def receive_video_handler(client, message):
 @app.on_callback_query(filters.regex("process_dub_final"))
 async def process_dub_final_callback(client, callback_query):
     user_id = callback_query.from_user.id
-    if user_id not in DUB_STUDIO_DATA or not DUB_STUDIO_DATA[user_id]["episode"]:
+    if user_id not in DUB_STUDIO_DATA or not DUB_STUDIO_DATA[user_id].get("episode"):
         await callback_query.answer("❌ Pehle Main Episode bhejo!", show_alert=True)
         return
         
@@ -569,24 +574,22 @@ async def process_dub_final_callback(client, callback_query):
     episode_path = session["episode"]
     clips = session["clips"]
     
-    if not os.path.exists(episode_path):
+    if not episode_path or not os.path.exists(episode_path):
         await callback_query.answer("❌ Episode file expire ho gayi, dubara shuru karein!", show_alert=True)
         return
 
     status_msg = await callback_query.message.edit_text(f"⚙️ **Processing Dub Mix:** {len(clips)} clips received. Removing noise & merging audio...")
-    output_final = f"final_synced_episode_{user_id}.mp4"
+    output_final = os.path.abspath(f"final_synced_episode_{user_id}.mp4")
     
     try:
         if not clips:
             os.rename(episode_path, output_final)
         else:
-            # Build ffmpeg inputs for muted episode and audio clips
             inputs = ["-i", episode_path]
             filter_inputs = ""
             for i, clip in enumerate(clips):
                 if os.path.exists(clip):
                     inputs.extend(["-i", clip])
-                    # Apply noise reduction (afftdn) and volume normalization to each audio clip stream
                     filter_inputs += f"[{i+1}:a]afftdn,volume=1.2[a{i}];"
             
             concat_str = "".join([f"[a{i}]" for i in range(len(clips))])
@@ -619,13 +622,12 @@ async def process_dub_final_callback(client, callback_query):
     except Exception as e:
         await status_msg.edit(f"❌ Dub Mix Processing Error: `{str(e)}`")
     finally:
-        # Cleanup temporary files
-        if os.path.exists(episode_path):
+        if episode_path and os.path.exists(episode_path):
             os.remove(episode_path)
         for c in clips:
-            if os.path.exists(c):
+            if c and os.path.exists(c):
                 os.remove(c)
-        if os.path.exists(output_final) and output_final != episode_path:
+        if output_final and os.path.exists(output_final) and output_final != episode_path:
             os.remove(output_final)
         if user_id in DUB_STUDIO_DATA:
             del DUB_STUDIO_DATA[user_id]
