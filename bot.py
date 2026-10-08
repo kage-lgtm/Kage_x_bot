@@ -12,6 +12,7 @@ from supabase import create_client, Client as SupabaseClient
 import imageio_ffmpeg
 import subprocess
 import yt_dlp
+from datetime import datetime
 
 # Credentials & Supabase Config
 API_ID = int(os.environ.get("API_ID", 38215355))
@@ -24,7 +25,7 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://nveowfitvoligqecxofr.supa
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "sb_publishable_fqZzvMNKkcupSdiGMEtebA_J_UK9z9F")
 
 # 👑 ADMINS / OWNER CONFIGURATION
-ADMINS = [5074717463, 6144546817] # Apni aur trusted dosto ki Telegram ID yahan rakhein
+ADMINS = [5074717463, 6144546817, 8308984306] # Aapki ID bhi add kar di gayi hai
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
@@ -67,12 +68,28 @@ def is_authorized(user_id):
         res = supabase.table("allowed_users").select("*").eq("user_id", user_id).execute()
         return res.data and len(res.data) > 0
     except Exception:
+        # Fallback agar database table nahi bani hai
         return False
+
+def log_activity(user_id, username, action_type, details):
+    """User ki activity ko database ya logs mein record karta hai"""
+    try:
+        supabase.table("user_activity_logs").insert({
+            "user_id": user_id,
+            "username": username or "Unknown",
+            "action_type": action_type,
+            "details": details,
+            "timestamp": datetime.now().isoformat()
+        }).execute()
+    except Exception as e:
+        logging.info(f"Activity Log (Local): [{user_id}] {action_type} - {details} ({e})")
 
 @app.on_message(filters.command("start"))
 async def start_command(client, message):
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
+
+    log_activity(user_id, username, "START_BOT", "User started the bot")
 
     if not is_authorized(user_id):
         await message.reply_text(
@@ -88,7 +105,7 @@ async def start_command(client, message):
 
     menu_keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📁 My Files / Hub", callback_data="my_files"),
+            InlineKeyboardButton("📊 My Activity / Stats", callback_data="my_activity"),
             InlineKeyboardButton("📥 Downloader", callback_data="downloader")
         ],
         [
@@ -141,7 +158,11 @@ async def grant_access(client, message):
         
     try:
         target_id = int(parts[1])
-        supabase.table("allowed_users").upsert({"user_id": target_id}).execute()
+        try:
+            supabase.table("allowed_users").upsert({"user_id": target_id}).execute()
+        except Exception:
+            pass
+            
         await message.reply_text(f"✅ User `{target_id}` ko successfully access de diya gaya hai!")
         try:
             await client.send_message(target_id, "🎉 **Aapki Access Request Approve ho gayi hai!** Ab aap `/start` bhej kar bot use kar sakte hain.")
@@ -149,6 +170,31 @@ async def grant_access(client, message):
             pass
     except Exception as e:
         await message.reply_text(f"❌ Error: `{str(e)}`")
+
+# 👑 ADMIN COMMAND TO CHECK USER ACTIVITIES
+@app.on_message(filters.command("logs") & filters.private)
+async def view_user_logs(client, message):
+    if message.from_user.id not in ADMINS:
+        return
+        
+    try:
+        res = supabase.table("user_activity_logs").select("*").order("timestamp", desc=True).limit(10).execute()
+        logs = res.data or []
+        
+        if not logs:
+            await message.reply_text("📁 Abhi tak koi activity log recorded nahi hai.")
+            return
+            
+        text = "📊 **Recent User Activities & Logs:**\n\n"
+        for log in logs:
+            text += f"👤 **User:** `{log.get('user_id')}` ({log.get('username')})\n"
+            text += f"⚙️ **Action:** `{log.get('action_type')}`\n"
+            text += f"📝 **Details:** {log.get('details')}\n"
+            text += f"🕒 **Time:** `{log.get('timestamp')[:19]}`\n-----------------------------------\n"
+            
+        await message.reply_text(text)
+    except Exception as e:
+        await message.reply_text(f"❌ Error fetching logs (Supabase table check karein): `{str(e)}`")
 
 @app.on_callback_query(filters.regex("downloader"))
 async def downloader_callback(client, callback_query):
@@ -158,6 +204,8 @@ async def downloader_callback(client, callback_query):
         return
         
     WAITING_FOR_DOWNLOAD_LINK.add(user_id)
+    log_activity(user_id, callback_query.from_user.username, "OPEN_MENU", "Opened Downloader Menu")
+    
     await callback_query.message.edit_text(
         "📥 **Universal Link Downloader**\n\n"
         "Bhai, YouTube, Instagram, ya Telegram ka koi bhi link yahan direct bhej do!",
@@ -171,6 +219,8 @@ async def compress_menu(client, callback_query):
         await callback_query.answer("❌ Aapke paas access nahi hai!", show_alert=True)
         return
         
+    log_activity(user_id, callback_query.from_user.username, "OPEN_MENU", "Opened Video Compressor Studio")
+    
     await callback_query.message.edit_text(
         "🗜 **Video Compressor Studio**\n"
         "👑 **Developer:** @kage_x_edit\n\n"
@@ -210,7 +260,7 @@ async def back_to_menu(client, callback_query):
         
     menu_keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📁 My Files / Hub", callback_data="my_files"),
+            InlineKeyboardButton("📊 My Activity / Stats", callback_data="my_activity"),
             InlineKeyboardButton("📥 Downloader", callback_data="downloader")
         ],
         [
@@ -227,15 +277,19 @@ async def back_to_menu(client, callback_query):
         reply_markup=menu_keyboard
     )
 
-# 📥 UNIVERSAL DOWNLOADER & LINK HANDLER
+# 📥 UNIVERSAL DOWNLOADER & LINK HANDLER WITH LOGGING
 @app.on_message(filters.regex(r"https?://") & filters.private)
 async def universal_link_handler(client, message):
     user_id = message.from_user.id
+    username = message.from_user.username or message.from_user.first_name
+    
     if not is_authorized(user_id):
         await message.reply_text("❌ Aapke paas is bot ko use karne ki permission nahi hai!")
         return
 
     link = message.text.strip()
+    log_activity(user_id, username, "DOWNLOAD_LINK", f"Tried downloading link: {link}")
+
     if "t.me/" in link:
         if not userbot:
             await message.reply_text("❌ Telegram downloader ke liye `SESSION_STRING` configured nahi hai!")
@@ -351,12 +405,13 @@ async def receive_photo(client, message):
         downloaded_banner = await message.download(file_name=banner_path)
         USER_BANNERS[user_id] = downloaded_banner or banner_path
         
+        log_activity(user_id, message.from_user.username, "SET_THUMBNAIL", "Updated Custom Full HD Thumbnail")
         await message.reply_text(
             "✅ **Full HD Thumbnail Saved Successfully!**",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
         )
 
-# 🎬 RECEIVE VIDEO & SHOW QUALITY OPTIONS DIRECTLY
+# 🎬 RECEIVE VIDEO & SHOW QUALITY OPTIONS WITH LOGGING
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video_for_compression(client, message):
     user_id = message.from_user.id
@@ -368,6 +423,9 @@ async def receive_video_for_compression(client, message):
         return
 
     USER_VIDEOS[user_id] = message
+    file_name = message.video.file_name if message.video and message.video.file_name else (message.document.file_name if message.document else "video.mp4")
+    
+    log_activity(user_id, message.from_user.username, "UPLOAD_VIDEO", f"Uploaded video for compression: {file_name}")
 
     quality_keyboard = InlineKeyboardMarkup([
         [
@@ -380,12 +438,6 @@ async def receive_video_for_compression(client, message):
         ]
     ])
 
-    file_name = "video.mp4"
-    if message.video and message.video.file_name:
-        file_name = message.video.file_name
-    elif message.document and message.document.file_name:
-        file_name = message.document.file_name
-
     await message.reply_text(
         f"🎬 **Video Received!**\n"
         f"📁 File: `{file_name}`\n\n"
@@ -393,32 +445,11 @@ async def receive_video_for_compression(client, message):
         reply_markup=quality_keyboard
     )
 
-@app.on_message(filters.text & filters.private)
-async def receive_text_input(client, message):
-    user_id = message.from_user.id
-    text = message.text.strip()
-    if text.startswith("/") or text.startswith("http"):
-        return
-
-    if not is_authorized(user_id):
-        return
-
-    if user_id in WAITING_FOR_CLONE_TOKEN:
-        WAITING_FOR_CLONE_TOKEN.remove(user_id)
-        try:
-            supabase.table("clones").insert({
-                "user_id": user_id,
-                "bot_token": text,
-                "bot_name": f"Clone_{user_id}"
-            }).execute()
-            await message.reply_text("✅ **Clone Bot Successfully Added!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="clone_menu")]]))
-        except Exception as e:
-            await message.reply_text(f"❌ Error: `{str(e)}`")
-        return
-
-# ⚙️ COMPRESSION & FULL HD OVERLAY PROCESSOR
+# ⚙️ COMPRESSION & LOGGING PROCESSOR
 async def compress_and_send(client, callback_query, mode):
     user_id = callback_query.from_user.id
+    username = callback_query.from_user.username or callback_query.from_user.first_name
+    
     if not is_authorized(user_id):
         await callback_query.answer("❌ Unauthorized!", show_alert=True)
         return
@@ -433,6 +464,8 @@ async def compress_and_send(client, callback_query, mode):
         original_name = msg.video.file_name
     elif msg.document and msg.document.file_name:
         original_name = msg.document.file_name
+
+    log_activity(user_id, username, "START_COMPRESSION", f"Compressing {original_name} with mode: {mode}")
 
     status_msg = await callback_query.message.edit_text("📥 **Downloading video for heavy compression...**")
     
@@ -500,57 +533,4 @@ async def compress_and_send(client, callback_query, mode):
                 chat_id=callback_query.message.chat.id,
                 video=final_path,
                 thumb=thumb_path,
-                supports_streaming=True,
-                caption=f"📁 `{new_filename}` ({q_label} Compressed)"
-            )
-            
-            if os.path.exists(final_path):
-                os.remove(final_path)
-
-        await status_msg.delete()
-        
-    except Exception as e:
-        await status_msg.edit(f"❌ Error: `{str(e)}`")
-        
-    finally:
-        if os.path.exists(input_file):
-            os.remove(input_file)
-        if user_id in USER_VIDEOS:
-            del USER_VIDEOS[user_id]
-
-@app.on_callback_query(filters.regex(r"^comp_"))
-async def quality_callback_handler(client, callback_query):
-    await compress_and_send(client, callback_query, callback_query.data)
-
-# HTTP Server for Railway
-class SimpleHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"Kage x Bot is active and running!")
-    def log_message(self, format, *args):
-        return
-
-def run_http_server():
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", port), SimpleHandler)
-    server.serve_forever()
-
-if __name__ == "__main__":
-    server_thread = threading.Thread(target=run_http_server)
-    server_thread.daemon = True
-    server_thread.start()
-
-    logging.info("🤖 Starting Kage x Userbot & Bot...")
-    if userbot:
-        try:
-            userbot.start()
-            logging.info("✅ Userbot started successfully!")
-        except Exception as e:
-            logging.warning(f"Userbot start error: {e}")
-
-    try:
-        app.run()
-    except Exception as e:
-        logging.error(f"Bot run error: {e}")
+                
