@@ -23,6 +23,9 @@ SESSION_STRING = "BQJHHrsAQohDxth8QaB1QzlGPlg2cO1cI-q5Viul5T2qLYszFLakA-2qWY0Bk2
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://nveowfitvoligqecxofr.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "sb_publishable_fqZzvMNKkcupSdiGMEtebA_J_UK9z9F")
 
+# 👑 ADMINS / OWNER CONFIGURATION
+ADMINS = [5074717463, 6144546817] # Apni aur trusted dosto ki Telegram ID yahan rakhein
+
 # Logging setup
 logging.basicConfig(level=logging.INFO)
 
@@ -57,9 +60,31 @@ USER_BANNERS = {}
 WAITING_FOR_CLONE_TOKEN = set()
 WAITING_FOR_DOWNLOAD_LINK = set()
 
+def is_authorized(user_id):
+    if user_id in ADMINS:
+        return True
+    try:
+        res = supabase.table("allowed_users").select("*").eq("user_id", user_id).execute()
+        return res.data and len(res.data) > 0
+    except Exception:
+        return False
+
 @app.on_message(filters.command("start"))
 async def start_command(client, message):
+    user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
+
+    if not is_authorized(user_id):
+        await message.reply_text(
+            f"👋 **Hello {username}!**\n\n"
+            f"Welcome to **Kage x Bot** 🚀\n"
+            f"❌ **Access Denied:** Aapke paas is bot ko use karne ki permission nahi hai.\n\n"
+            f"Features use karne ke liye owner se permission lein ya neeche diye gaye button par click karke access request bhejein:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📨 Request Access from Owner", callback_data=f"req_access_{user_id}")]
+            ])
+        )
+        return
 
     menu_keyboard = InlineKeyboardMarkup([
         [
@@ -84,18 +109,68 @@ async def start_command(client, message):
         reply_markup=menu_keyboard
     )
 
+@app.on_callback_query(filters.regex(r"^req_access_"))
+async def request_access_handler(client, callback_query):
+    user_id = callback_query.from_user.id
+    username = callback_query.from_user.username or callback_query.from_user.first_name
+    
+    await callback_query.answer("✅ Request owner ke paas bhej di gayi hai!", show_alert=True)
+    await callback_query.message.edit_text("⏳ **Request Sent!** Owner ki approval ka intezaar karein.")
+    
+    for admin_id in ADMINS:
+        try:
+            await client.send_message(
+                chat_id=admin_id,
+                text=f"🔔 **New Access Request!**\n\n"
+                     f"👤 User: {username} (`{user_id}`)\n\n"
+                     f"Access dene ke liye yeh command bhejein:\n"
+                     f"`/grant {user_id}`"
+            )
+        except Exception:
+            pass
+
+@app.on_message(filters.command("grant") & filters.private)
+async def grant_access(client, message):
+    if message.from_user.id not in ADMINS:
+        return
+        
+    parts = message.text.split()
+    if len(parts) < 2:
+        await message.reply_text("❌ Sahi format use karein: `/grant <user_id>`")
+        return
+        
+    try:
+        target_id = int(parts[1])
+        supabase.table("allowed_users").upsert({"user_id": target_id}).execute()
+        await message.reply_text(f"✅ User `{target_id}` ko successfully access de diya gaya hai!")
+        try:
+            await client.send_message(target_id, "🎉 **Aapki Access Request Approve ho gayi hai!** Ab aap `/start` bhej kar bot use kar sakte hain.")
+        except Exception:
+            pass
+    except Exception as e:
+        await message.reply_text(f"❌ Error: `{str(e)}`")
+
 @app.on_callback_query(filters.regex("downloader"))
 async def downloader_callback(client, callback_query):
     user_id = callback_query.from_user.id
+    if not is_authorized(user_id):
+        await callback_query.answer("❌ Aapke paas access nahi hai!", show_alert=True)
+        return
+        
     WAITING_FOR_DOWNLOAD_LINK.add(user_id)
     await callback_query.message.edit_text(
         "📥 **Universal Link Downloader**\n\n"
-        "Bhai, YouTube, Instagram, ya Telegram ka koi bhi link yahan direct bhej do! Bot media download karke bhej dega.",
+        "Bhai, YouTube, Instagram, ya Telegram ka koi bhi link yahan direct bhej do!",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]])
     )
 
 @app.on_callback_query(filters.regex("compress_menu"))
 async def compress_menu(client, callback_query):
+    user_id = callback_query.from_user.id
+    if not is_authorized(user_id):
+        await callback_query.answer("❌ Aapke paas access nahi hai!", show_alert=True)
+        return
+        
     await callback_query.message.edit_text(
         "🗜 **Video Compressor Studio**\n"
         "👑 **Developer:** @kage_x_edit\n\n"
@@ -109,6 +184,10 @@ async def compress_menu(client, callback_query):
 @app.on_callback_query(filters.regex("set_banner_menu"))
 async def set_banner_menu(client, callback_query):
     user_id = callback_query.from_user.id
+    if not is_authorized(user_id):
+        await callback_query.answer("❌ Aapke paas access nahi hai!", show_alert=True)
+        return
+        
     USER_SETTING_BANNER.add(user_id)
     banner_path = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
     has_banner = os.path.exists(banner_path)
@@ -122,6 +201,9 @@ async def set_banner_menu(client, callback_query):
 @app.on_callback_query(filters.regex("back_to_menu"))
 async def back_to_menu(client, callback_query):
     user_id = callback_query.from_user.id
+    if not is_authorized(user_id):
+        return
+        
     USER_SETTING_BANNER.discard(user_id)
     WAITING_FOR_CLONE_TOKEN.discard(user_id)
     WAITING_FOR_DOWNLOAD_LINK.discard(user_id)
@@ -145,12 +227,15 @@ async def back_to_menu(client, callback_query):
         reply_markup=menu_keyboard
     )
 
-# 📥 UNIVERSAL DOWNLOADER (Instagram, YouTube & Telegram)
+# 📥 UNIVERSAL DOWNLOADER & LINK HANDLER
 @app.on_message(filters.regex(r"https?://") & filters.private)
 async def universal_link_handler(client, message):
+    user_id = message.from_user.id
+    if not is_authorized(user_id):
+        await message.reply_text("❌ Aapke paas is bot ko use karne ki permission nahi hai!")
+        return
+
     link = message.text.strip()
-    
-    # Check if it's a Telegram link
     if "t.me/" in link:
         if not userbot:
             await message.reply_text("❌ Telegram downloader ke liye `SESSION_STRING` configured nahi hai!")
@@ -215,45 +300,51 @@ async def universal_link_handler(client, message):
             await progress_msg.edit(f"❌ Error: `{str(e)}`")
             
     else:
-        # Instagram, YouTube & Other platforms using yt-dlp
-        progress_msg = await message.reply_text("📥 **Downloading from Social Media (YT/Insta)...**")
-        output_template = f"downloaded_{message.from_user.id}.%(ext)s"
-        
+        progress_msg = await message.reply_text("📥 **Downloading media from link (Insta/YT)...**")
         ydl_opts = {
-            'format': 'best',
-            'outtmpl': output_template,
-            'max_filesize': 500 * 1024 * 1024, # Limit to 500MB to avoid crashes
+            'outtmpl': f'downloaded_{message.from_user.id}.%(ext)s',
+            'max_filesize': 500 * 1024 * 1024,
+            'noplaylist': True,
         }
         
-        downloaded_file = None
+        downloaded_files = []
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(link, download=True)
-                downloaded_file = ydl.prepare_filename(info)
-                
-            await progress_msg.edit("📤 **Uploading media file...**")
-            
-            if downloaded_file and os.path.exists(downloaded_file):
-                if downloaded_file.endswith(('.mp4', '.mkv', '.webm', '.mov')):
-                    await client.send_video(chat_id=message.chat.id, video=downloaded_file, supports_streaming=True)
-                elif downloaded_file.endswith(('.jpg', '.jpeg', '.png', '.webp')):
-                    await client.send_photo(chat_id=message.chat.id, photo=downloaded_file)
+                if 'entries' in info:
+                    for entry in info['entries']:
+                        filename = ydl.prepare_filename(entry)
+                        if os.path.exists(filename):
+                            downloaded_files.append(filename)
                 else:
-                    await client.send_document(chat_id=message.chat.id, document=downloaded_file)
+                    filename = ydl.prepare_filename(info)
+                    if os.path.exists(filename):
+                        downloaded_files.append(filename)
+
+            if downloaded_files:
+                await progress_msg.edit("📤 **Uploading media file(s)...**")
+                for file_path in downloaded_files:
+                    if file_path.endswith(('.mp4', '.mkv', '.webm', '.mov')):
+                        await client.send_video(chat_id=message.chat.id, video=file_path, supports_streaming=True)
+                    elif file_path.endswith(('.jpg', '.jpeg', '.png', '.webp', '.jfif')):
+                        await client.send_photo(chat_id=message.chat.id, photo=file_path)
+                    else:
+                        await client.send_document(chat_id=message.chat.id, document=file_path)
                     
-                os.remove(downloaded_file)
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                await progress_msg.delete()
             else:
-                await progress_msg.edit("❌ File download nahi ho payi!")
-                
-            await progress_msg.delete()
+                await progress_msg.edit("❌ Is link par koi download karne layak media nahi mila!")
         except Exception as e:
             await progress_msg.edit(f"❌ Download Error: `{str(e)}`")
-            if downloaded_file and os.path.exists(downloaded_file):
-                os.remove(downloaded_file)
 
 @app.on_message(filters.photo & filters.private)
 async def receive_photo(client, message):
     user_id = message.from_user.id
+    if not is_authorized(user_id):
+        return
+
     if user_id in USER_SETTING_BANNER:
         USER_SETTING_BANNER.remove(user_id)
         banner_path = f"banner_{user_id}.png"
@@ -269,6 +360,10 @@ async def receive_photo(client, message):
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video_for_compression(client, message):
     user_id = message.from_user.id
+    if not is_authorized(user_id):
+        await message.reply_text("❌ Aapke paas is bot ko use karne ki permission nahi hai!")
+        return
+
     if message.document and not message.document.mime_type.startswith("video"):
         return
 
@@ -305,6 +400,9 @@ async def receive_text_input(client, message):
     if text.startswith("/") or text.startswith("http"):
         return
 
+    if not is_authorized(user_id):
+        return
+
     if user_id in WAITING_FOR_CLONE_TOKEN:
         WAITING_FOR_CLONE_TOKEN.remove(user_id)
         try:
@@ -321,6 +419,10 @@ async def receive_text_input(client, message):
 # ⚙️ COMPRESSION & FULL HD OVERLAY PROCESSOR
 async def compress_and_send(client, callback_query, mode):
     user_id = callback_query.from_user.id
+    if not is_authorized(user_id):
+        await callback_query.answer("❌ Unauthorized!", show_alert=True)
+        return
+
     if user_id not in USER_VIDEOS:
         await callback_query.answer("⚠ Session expired! Dubara video bhejo.", show_alert=True)
         return
