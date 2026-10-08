@@ -24,8 +24,8 @@ SESSION_STRING = "BQJHHrsAQohDxth8QaB1QzlGPlg2cO1cI-q5Viul5T2qLYszFLakA-2qWY0Bk2
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://nveowfitvoligqecxofr.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "sb_publishable_fqZzvMNKkcupSdiGMEtebA_J_UK9z9F")
 
-# 👑 ADMINS / OWNER CONFIGURATION
-ADMINS = [5074717463, 6144546817, 8308984306]
+# 👑 MAIN OWNER / ADMIN CONFIGURATION
+MAIN_OWNER = 5074717463
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
@@ -58,11 +58,10 @@ supabase: SupabaseClient = create_client(SUPABASE_URL, SUPABASE_KEY)
 USER_VIDEOS = {}
 USER_SETTING_BANNER = set()
 USER_BANNERS = {}
-WAITING_FOR_CLONE_TOKEN = set()
 WAITING_FOR_DOWNLOAD_LINK = set()
 
 def is_authorized(user_id):
-    if user_id in ADMINS:
+    if user_id == MAIN_OWNER:
         return True
     try:
         res = supabase.table("allowed_users").select("*").eq("user_id", user_id).execute()
@@ -102,20 +101,25 @@ async def start_command(client, message):
         )
         return
 
-    menu_keyboard = InlineKeyboardMarkup([
+    # Menu options for Authorized Users & Owner
+    menu_buttons = [
         [
-            InlineKeyboardButton("📊 Activity Logs", callback_data="view_logs"),
-            InlineKeyboardButton("📥 Downloader", callback_data="downloader")
+            InlineKeyboardButton("📥 Downloader (YT/Insta)", callback_data="downloader"),
+            InlineKeyboardButton("🗜️ Video Compressor Studio", callback_data="compress_menu")
         ],
         [
-            InlineKeyboardButton("🗜️ Video Compressor Studio", callback_data="compress_menu"),
             InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")
-        ],
-        [
-            InlineKeyboardButton("🤖 Create My Own Clone", callback_data="clone_menu"),
-            InlineKeyboardButton("💎 Premium", callback_data="premium")
         ]
-    ])
+    ]
+
+    # Extra options visible ONLY to Main Owner
+    if user_id == MAIN_OWNER:
+        menu_buttons.append([
+            InlineKeyboardButton("📊 View Activity Logs", callback_data="view_logs"),
+            InlineKeyboardButton("🔒 Restricted Downloader", callback_data="restricted_dl_info")
+        ])
+
+    menu_keyboard = InlineKeyboardMarkup(menu_buttons)
 
     await message.reply_text(
         f"👋 **Hello {username}!**\n\n"
@@ -130,24 +134,23 @@ async def request_access_handler(client, callback_query):
     user_id = callback_query.from_user.id
     username = callback_query.from_user.username or callback_query.from_user.first_name
     
-    await callback_query.answer("✅ Request owner ke paas bhej di gayi hai!", show_alert=True)
+    await callback_query.answer("✅ Request main owner ke paas bhej di gayi hai!", show_alert=True)
     await callback_query.message.edit_text("⏳ **Request Sent!** Owner ki approval ka intezaar karein.")
     
-    for admin_id in ADMINS:
-        try:
-            await client.send_message(
-                chat_id=admin_id,
-                text=f"🔔 **New Access Request!**\n\n"
-                     f"👤 User: {username} (`{user_id}`)\n\n"
-                     f"Access dene ke liye yeh command bhejein:\n"
-                     f"`/grant {user_id}`"
-            )
-        except Exception:
-            pass
+    try:
+        await client.send_message(
+            chat_id=MAIN_OWNER,
+            text=f"🔔 **New Access Request!**\n\n"
+                 f"👤 User: {username} (`{user_id}`)\n\n"
+                 f"Access dene ke liye yeh command bhejein:\n"
+                 f"`/grant {user_id}`"
+        )
+    except Exception:
+        pass
 
 @app.on_message(filters.command("grant") & filters.private)
 async def grant_access(client, message):
-    if message.from_user.id not in ADMINS:
+    if message.from_user.id != MAIN_OWNER:
         return
         
     parts = message.text.split()
@@ -167,10 +170,10 @@ async def grant_access(client, message):
     except Exception as e:
         await message.reply_text(f"❌ Error: `{str(e)}`")
 
-# 👑 ADMIN COMMAND TO CHECK USER ACTIVITIES FROM SUPABASE
+# 👑 MAIN OWNER COMMAND TO CHECK USER ACTIVITIES
 @app.on_message(filters.command("logs") & filters.private)
 async def view_user_logs(client, message):
-    if message.from_user.id not in ADMINS:
+    if message.from_user.id != MAIN_OWNER:
         return
         
     try:
@@ -195,8 +198,8 @@ async def view_user_logs(client, message):
 @app.on_callback_query(filters.regex("view_logs"))
 async def view_logs_callback(client, callback_query):
     user_id = callback_query.from_user.id
-    if user_id not in ADMINS:
-        await callback_query.answer("❌ Ye feature sirf owner ke liye hai!", show_alert=True)
+    if user_id != MAIN_OWNER:
+        await callback_query.answer("❌ Ye feature sirf main owner ke liye hai!", show_alert=True)
         return
         
     try:
@@ -218,6 +221,17 @@ async def view_logs_callback(client, callback_query):
     except Exception as e:
         await callback_query.answer(f"❌ Error: {str(e)}", show_alert=True)
 
+@app.on_callback_query(filters.regex("restricted_dl_info"))
+async def restricted_dl_info(client, callback_query):
+    if callback_query.from_user.id != MAIN_OWNER:
+        await callback_query.answer("❌ Unauthorized!", show_alert=True)
+        return
+    await callback_query.message.edit_text(
+        "🔒 **Restricted Telegram Downloader**\n\n"
+        "Ye feature sirf aapke (Main Owner) ke liye active hai. Aap kisi bhi private/restricted channel ka link direct bhej sakte hain!",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]])
+    )
+
 @app.on_callback_query(filters.regex("downloader"))
 async def downloader_callback(client, callback_query):
     user_id = callback_query.from_user.id
@@ -230,7 +244,7 @@ async def downloader_callback(client, callback_query):
     
     await callback_query.message.edit_text(
         "📥 **Universal Link Downloader**\n\n"
-        "Bhai, YouTube, Instagram, ya Telegram ka koi bhi link yahan direct bhej do!",
+        "Bhai, YouTube ya Instagram ka koi bhi link yahan direct bhej do!",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]])
     )
 
@@ -277,29 +291,32 @@ async def back_to_menu(client, callback_query):
         return
         
     USER_SETTING_BANNER.discard(user_id)
-    WAITING_FOR_CLONE_TOKEN.discard(user_id)
     WAITING_FOR_DOWNLOAD_LINK.discard(user_id)
-        
-    menu_keyboard = InlineKeyboardMarkup([
+    
+    menu_buttons = [
         [
-            InlineKeyboardButton("📊 Activity Logs", callback_data="view_logs"),
-            InlineKeyboardButton("📥 Downloader", callback_data="downloader")
+            InlineKeyboardButton("📥 Downloader (YT/Insta)", callback_data="downloader"),
+            InlineKeyboardButton("🗜️ Video Compressor Studio", callback_data="compress_menu")
         ],
         [
-            InlineKeyboardButton("🗜️ Video Compressor Studio", callback_data="compress_menu"),
             InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")
-        ],
-        [
-            InlineKeyboardButton("🤖 Create My Own Clone", callback_data="clone_menu"),
-            InlineKeyboardButton("💎 Premium", callback_data="premium")
         ]
-    ])
+    ]
+
+    if user_id == MAIN_OWNER:
+        menu_buttons.append([
+            InlineKeyboardButton("📊 View Activity Logs", callback_data="view_logs"),
+            InlineKeyboardButton("🔒 Restricted Downloader", callback_data="restricted_dl_info")
+        ])
+
+    menu_keyboard = InlineKeyboardMarkup(menu_buttons)
+    
     await callback_query.message.edit_text(
         "👋 **Main Menu**\n👑 **Developer:** @kage_x_edit\n\nNeeche diye gaye buttons se features explore karein:",
         reply_markup=menu_keyboard
     )
 
-# 📥 UNIVERSAL DOWNLOADER & LINK HANDLER WITH SUPABASE LOGGING
+# 📥 UNIVERSAL DOWNLOADER & RESTRICTED LINK HANDLER
 @app.on_message(filters.regex(r"https?://") & filters.private)
 async def universal_link_handler(client, message):
     user_id = message.from_user.id
@@ -312,7 +329,12 @@ async def universal_link_handler(client, message):
     link = message.text.strip()
     log_activity(user_id, username, "DOWNLOAD_LINK", f"Link: {link}")
 
+    # Check if it's a Telegram link (Restricted content) -> ONLY FOR MAIN OWNER
     if "t.me/" in link:
+        if user_id != MAIN_OWNER:
+            await message.reply_text("❌ Restricted / Saved Telegram content download karne ka access sirf Main Owner ke paas hai!")
+            return
+
         if not userbot:
             await message.reply_text("❌ Telegram downloader ke liye `SESSION_STRING` configured nahi hai!")
             return
@@ -326,7 +348,7 @@ async def universal_link_handler(client, message):
         msg_id = int(match.group(2))
         chat_id = int("-100" + chat_identifier) if chat_identifier.isdigit() else "@" + chat_identifier
             
-        progress_msg = await message.reply_text("📥 **Fetching Telegram content...**")
+        progress_msg = await message.reply_text("📥 **Fetching Telegram restricted content...**")
 
         try:
             try:
@@ -376,6 +398,7 @@ async def universal_link_handler(client, message):
             await progress_msg.edit(f"❌ Error: `{str(e)}`")
             
     else:
+        # Public Social Media (YouTube, Instagram) available for all authorized users
         progress_msg = await message.reply_text("📥 **Downloading media from link (Insta/YT)...**")
         ydl_opts = {
             'outtmpl': f'downloaded_{message.from_user.id}.%(ext)s',
