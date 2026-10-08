@@ -82,44 +82,12 @@ async def start_command(client, message):
         reply_markup=menu_keyboard
     )
 
-@app.on_callback_query(filters.regex("clone_menu"))
-async def clone_menu(client, callback_query):
-    user_id = callback_query.from_user.id
-    clones_list = []
-    try:
-        response = supabase.table("clones").select("*").eq("user_id", user_id).execute()
-        clones_list = response.data or []
-    except Exception:
-        pass
-
-    buttons = [[InlineKeyboardButton("➕ Add Clone", callback_data="add_clone_prompt")]]
-    for clone in clones_list:
-        bot_name = clone.get("bot_name", "My Clone")
-        buttons.append([InlineKeyboardButton(f"🤖 {bot_name}", callback_data=f"manage_clone_{clone.get('id')}")])
-    buttons.append([InlineKeyboardButton("⬅ Back to Menu", callback_data="back_to_menu")])
-
-    await callback_query.message.edit_text(
-        "✨ **Manage Clone's**\n\n"
-        "You can manage and create your very own identical clone bot using given buttons.",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-
-@app.on_callback_query(filters.regex("add_clone_prompt"))
-async def add_clone_prompt(client, callback_query):
-    user_id = callback_query.from_user.id
-    WAITING_FOR_CLONE_TOKEN.add(user_id)
-    await callback_query.message.edit_text(
-        "➕ **Add New Clone Bot**\n\n"
-        "Apne bot ka **BotFather Token** yahan chat mein direct bhej do!",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="clone_menu")]])
-    )
-
 @app.on_callback_query(filters.regex("compress_menu"))
 async def compress_menu(client, callback_query):
     await callback_query.message.edit_text(
         "🗜 **Video Compressor Studio**\n"
         "👑 **Developer:** @kage_x_edit\n\n"
-        "Bhai, apni video yahan direct bhej do. Bot bina naam badle aapko 360p, 720p, 1080p aur All-in-3 options dega!",
+        "Bhai, apni video yahan direct bhej do. Bot 360p, 720p, 1080p aur All-in-3 options mein heavy compression ke sath file dega!",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")],
             [InlineKeyboardButton("⬅ Back to Menu", callback_data="back_to_menu")]
@@ -135,7 +103,7 @@ async def set_banner_menu(client, callback_query):
     status_text = "🟢 **Custom thumbnail saved hai!**" if has_banner else "🔴 **Koi thumbnail saved nahi hai.**"
     
     await callback_query.message.edit_text(
-        f"🖼 **Custom Thumbnail Setup**\n\n{status_text}\n\nApni Thumbnail/Logo image yahan bhej do!",
+        f"🖼 **Custom Thumbnail Setup (Full HD)**\n\n{status_text}\n\nApni HD Thumbnail/Logo image yahan bhej do!",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]])
     )
 
@@ -239,11 +207,11 @@ async def receive_photo(client, message):
         USER_BANNERS[user_id] = downloaded_banner or banner_path
         
         await message.reply_text(
-            "✅ **Thumbnail Saved Successfully!**",
+            "✅ **Full HD Thumbnail Saved Successfully!**",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
         )
 
-# 🎬 RECEIVE VIDEO & SHOW QUALITY OPTIONS DIRECTLY (NO FILENAME PROMPT)
+# 🎬 RECEIVE VIDEO & SHOW QUALITY OPTIONS DIRECTLY
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video_for_compression(client, message):
     user_id = message.from_user.id
@@ -258,7 +226,7 @@ async def receive_video_for_compression(client, message):
             InlineKeyboardButton("📊 720p (Balanced)", callback_data="comp_720p")
         ],
         [
-            InlineKeyboardButton("📈 1080p (HD High Quality)", callback_data="comp_1080p"),
+            InlineKeyboardButton("📈 1080p (HD Compressed)", callback_data="comp_1080p"),
             InlineKeyboardButton("🔥 All in 3 Qualities (360+720+1080)", callback_data="comp_all")
         ]
     ])
@@ -276,27 +244,7 @@ async def receive_video_for_compression(client, message):
         reply_markup=quality_keyboard
     )
 
-@app.on_message(filters.text & filters.private)
-async def receive_text_input(client, message):
-    user_id = message.from_user.id
-    text = message.text.strip()
-    if text.startswith("/"):
-        return
-
-    if user_id in WAITING_FOR_CLONE_TOKEN:
-        WAITING_FOR_CLONE_TOKEN.remove(user_id)
-        try:
-            supabase.table("clones").insert({
-                "user_id": user_id,
-                "bot_token": text,
-                "bot_name": f"Clone_{user_id}"
-            }).execute()
-            await message.reply_text("✅ **Clone Bot Successfully Added!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="clone_menu")]]))
-        except Exception as e:
-            await message.reply_text(f"❌ Error: `{str(e)}`")
-        return
-
-# ⚙️ COMPRESSION & MULTI-QUALITY PROCESSOR
+# ⚙️ COMPRESSION & FULL HD OVERLAY PROCESSOR
 async def compress_and_send(client, callback_query, mode):
     user_id = callback_query.from_user.id
     if user_id not in USER_VIDEOS:
@@ -310,7 +258,7 @@ async def compress_and_send(client, callback_query, mode):
     elif msg.document and msg.document.file_name:
         original_name = msg.document.file_name
 
-    status_msg = await callback_query.message.edit_text("📥 **Downloading video for fast compression...**")
+    status_msg = await callback_query.message.edit_text("📥 **Downloading video for heavy compression...**")
     
     input_file = f"input_{user_id}.mp4"
     banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
@@ -325,20 +273,20 @@ async def compress_and_send(client, callback_query, mode):
         elif mode == "comp_720p":
             qualities_to_process = [("720p", "scale=-2:720", "26")]
         elif mode == "comp_1080p":
-            qualities_to_process = [("1080p", "scale=-2:1080", "24")]
+            qualities_to_process = [("1080p", "scale=-2:1080", "28")] # Fixed to 28 for heavy compression
         elif mode == "comp_all":
             qualities_to_process = [
                 ("360p", "scale=-2:360", "28"),
                 ("720p", "scale=-2:720", "26"),
-                ("1080p", "scale=-2:1080", "24")
+                ("1080p", "scale=-2:1080", "28") # Fixed to 28 for heavy compression
             ]
 
         for q_label, scale_filter, crf_val in qualities_to_process:
-            await status_msg.edit(f"⚙️ **Compressing to {q_label} (Reducing MB/GB)...**")
+            await status_msg.edit(f"⚙️ **Compressing to {q_label} with Full HD Thumbnail...**")
             output_file = f"output_{user_id}_{q_label}.mp4"
             
             if has_banner:
-                filter_complex = f"[0:v]{scale_filter}[v_scaled];[1:v]scale=-1:60[banner];[v_scaled][banner]overlay=W-w-15:15[v]"
+                filter_complex = f"[0:v]{scale_filter}[v_scaled];[1:v]scale=-1:80:flags=lanczos[banner];[v_scaled][banner]overlay=W-w-20:20[v]"
                 command = [
                     FFMPEG_PATH, "-i", downloaded_path, "-i", banner_file,
                     "-filter_complex", filter_complex,
