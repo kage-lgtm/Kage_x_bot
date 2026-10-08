@@ -2,3 +2,4 @@ pyrogram
 tgcrypto
 supabase
 imageio-ffmpeg
+yt-dlp
