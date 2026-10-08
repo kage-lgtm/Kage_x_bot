@@ -481,7 +481,7 @@ async def receive_video_for_compression(client, message):
         reply_markup=quality_keyboard
     )
 
-# ⚙️ COMPRESSION & SEND WITH POSTER THUMBNAIL (NO OVERLAY INSIDE VIDEO)
+# ⚙️ ROBUST COMPRESSION & SEND WITH POSTER THUMBNAIL
 async def compress_and_send(client, callback_query, mode):
     user_id = callback_query.from_user.id
     username = callback_query.from_user.username or callback_query.from_user.first_name
@@ -529,12 +529,13 @@ async def compress_and_send(client, callback_query, mode):
             await status_msg.edit(f"⚙️ **Compressing to {q_label}...**")
             output_file = f"output_{user_id}_{q_label}.mp4"
             
-            # Clean compression without any video overlay inside
+            # Robust FFmpeg command with faststart flag for complete streaming and playback support
             command = [
                 FFMPEG_PATH, "-i", downloaded_path,
                 "-vf", scale_filter,
                 "-c:v", "libx264", "-crf", crf_val, "-preset", "veryfast",
                 "-c:a", "aac", "-b:a", "96k",
+                "-movflags", "+faststart",
                 output_file, "-y"
             ]
                 
@@ -551,7 +552,7 @@ async def compress_and_send(client, callback_query, mode):
                 os.remove(final_path)
             os.rename(final_output, final_path)
             
-            # Set poster/banner as video thumbnail (cover image) outside video
+            # Ensure fresh thumb reference for each file send
             thumb_path = banner_file if os.path.exists(banner_file) else None
             await status_msg.edit(f"📤 **Sending {q_label} compressed video with Poster Thumbnail...**")
             
@@ -563,12 +564,16 @@ async def compress_and_send(client, callback_query, mode):
                 caption=f"📁 `{new_filename}` ({q_label} Compressed)"
             )
             
+            # Small delay to ensure file handle is safely closed between uploads
+            await asyncio.sleep(1)
+            
             if os.path.exists(final_path):
                 os.remove(final_path)
 
         await status_msg.delete()
         
     except Exception as e:
+        log_activity(user_id, username, "ERROR_COMPRESS", str(e))
         await status_msg.edit(f"❌ Error: `{str(e)}`")
         
     finally:
