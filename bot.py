@@ -104,9 +104,6 @@ async def start_command(client, message):
         [
             InlineKeyboardButton("📥 Downloader (YT/Insta)", callback_data="downloader"),
             InlineKeyboardButton("🗜️ Video Compressor Studio", callback_data="compress_menu")
-        ],
-        [
-            InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")
         ]
     ]
 
@@ -258,26 +255,8 @@ async def compress_menu(client, callback_query):
         "👑 **Developer:** @kage_x_edit\n\n"
         "Bhai, apni video yahan direct bhej do. Bot 360p, 720p, 1080p aur All-in-3 options mein heavy compression ke sath file dega!",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")],
             [InlineKeyboardButton("⬅ Back to Menu", callback_data="back_to_menu")]
         ])
-    )
-
-@app.on_callback_query(filters.regex("set_banner_menu"))
-async def set_banner_menu(client, callback_query):
-    user_id = callback_query.from_user.id
-    if not is_authorized(user_id):
-        await callback_query.answer("❌ Aapke paas access nahi hai!", show_alert=True)
-        return
-        
-    USER_SETTING_BANNER.add(user_id)
-    banner_path = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
-    has_banner = os.path.exists(banner_path)
-    status_text = "🟢 **Custom thumbnail saved hai!**" if has_banner else "🔴 **Koi thumbnail saved nahi hai.**"
-    
-    await callback_query.message.edit_text(
-        f"🖼 **Custom Thumbnail Setup (Poster)**\n\n{status_text}\n\nApni Poster/Thumbnail image yahan bhej do!",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]])
     )
 
 @app.on_callback_query(filters.regex("back_to_menu"))
@@ -286,16 +265,12 @@ async def back_to_menu(client, callback_query):
     if not is_authorized(user_id):
         return
         
-    USER_SETTING_BANNER.discard(user_id)
     WAITING_FOR_DOWNLOAD_LINK.discard(user_id)
     
     menu_buttons = [
         [
             InlineKeyboardButton("📥 Downloader (YT/Insta)", callback_data="downloader"),
             InlineKeyboardButton("🗜️ Video Compressor Studio", callback_data="compress_menu")
-        ],
-        [
-            InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")
         ]
     ]
 
@@ -363,12 +338,9 @@ async def universal_link_handler(client, message):
                 file_path = await target_msg.download()
                 await progress_msg.edit("📤 **Uploading to your chat...**")
                 
-                banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
-                thumb_path = banner_file if os.path.exists(banner_file) else None
-                
                 if target_msg.video:
                     await client.send_video(
-                        chat_id=message.chat.id, video=file_path, thumb=thumb_path,
+                        chat_id=message.chat.id, video=file_path, thumb=None,
                         duration=target_msg.video.duration, width=target_msg.video.width,
                         height=target_msg.video.height, supports_streaming=True, caption=target_msg.caption or ""
                     )
@@ -410,12 +382,9 @@ async def universal_link_handler(client, message):
 
             if downloaded_files:
                 await progress_msg.edit("📤 **Uploading media file(s)...**")
-                banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
-                thumb_path = banner_file if os.path.exists(banner_file) else None
-
                 for file_path in downloaded_files:
                     if file_path.endswith(('.mp4', '.mkv', '.webm', '.mov')):
-                        await client.send_video(chat_id=message.chat.id, video=file_path, thumb=thumb_path, supports_streaming=True)
+                        await client.send_video(chat_id=message.chat.id, video=file_path, thumb=None, supports_streaming=True)
                     elif file_path.endswith(('.jpg', '.jpeg', '.png', '.webp', '.jfif')):
                         await client.send_photo(chat_id=message.chat.id, photo=file_path)
                     else:
@@ -428,24 +397,6 @@ async def universal_link_handler(client, message):
                 await progress_msg.edit("❌ Is link par koi download karne layak media nahi mila!")
         except Exception as e:
             await progress_msg.edit(f"❌ Download Error: `{str(e)}`")
-
-@app.on_message(filters.photo & filters.private)
-async def receive_photo(client, message):
-    user_id = message.from_user.id
-    if not is_authorized(user_id):
-        return
-
-    if user_id in USER_SETTING_BANNER:
-        USER_SETTING_BANNER.remove(user_id)
-        banner_path = f"banner_{user_id}.png"
-        downloaded_banner = await message.download(file_name=banner_path)
-        USER_BANNERS[user_id] = downloaded_banner or banner_path
-        
-        log_activity(user_id, message.from_user.username, "SET_THUMBNAIL", "Updated Custom Poster Thumbnail")
-        await message.reply_text(
-            "✅ **Poster Thumbnail Saved Successfully!**\nAb koi bhi video compress ya download karoge, toh yeh poster uske cover/thumbnail par set ho jayega.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
-        )
 
 # 🎬 RECEIVE VIDEO & SHOW QUALITY OPTIONS
 @app.on_message((filters.video | filters.document) & filters.private)
@@ -481,7 +432,7 @@ async def receive_video_for_compression(client, message):
         reply_markup=quality_keyboard
     )
 
-# ⚙️ ROBUST COMPRESSION & SEND WITH POSTER THUMBNAIL
+# ⚙️ COMPRESSION & SEND WITHOUT THUMBNAIL
 async def compress_and_send(client, callback_query, mode):
     user_id = callback_query.from_user.id
     username = callback_query.from_user.username or callback_query.from_user.first_name
@@ -506,7 +457,6 @@ async def compress_and_send(client, callback_query, mode):
     status_msg = await callback_query.message.edit_text("📥 **Downloading video for heavy compression...**")
     
     input_file = f"input_{user_id}.mp4"
-    banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
     
     try:
         downloaded_path = await msg.download(file_name=input_file)
@@ -529,7 +479,6 @@ async def compress_and_send(client, callback_query, mode):
             await status_msg.edit(f"⚙️ **Compressing to {q_label}...**")
             output_file = f"output_{user_id}_{q_label}.mp4"
             
-            # Robust FFmpeg command with faststart flag for complete streaming and playback support
             command = [
                 FFMPEG_PATH, "-i", downloaded_path,
                 "-vf", scale_filter,
@@ -552,19 +501,16 @@ async def compress_and_send(client, callback_query, mode):
                 os.remove(final_path)
             os.rename(final_output, final_path)
             
-            # Ensure fresh thumb reference for each file send
-            thumb_path = banner_file if os.path.exists(banner_file) else None
-            await status_msg.edit(f"📤 **Sending {q_label} compressed video with Poster Thumbnail...**")
+            await status_msg.edit(f"📤 **Sending {q_label} compressed video (Clean)...**")
             
             await client.send_video(
                 chat_id=callback_query.message.chat.id,
                 video=final_path,
-                thumb=thumb_path,
+                thumb=None,
                 supports_streaming=True,
                 caption=f"📁 `{new_filename}` ({q_label} Compressed)"
             )
             
-            # Small delay to ensure file handle is safely closed between uploads
             await asyncio.sleep(1)
             
             if os.path.exists(final_path):
@@ -592,7 +538,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Kage x Bot is active and running!")
+        self.wfile.wfile.write(b"Kage x Bot is active and running!") if hasattr(self.wfile, 'wfile') else self.wfile.write(b"Kage x Bot is active and running!")
     def log_message(self, format, *args):
         return
 
