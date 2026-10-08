@@ -11,6 +11,7 @@ from pyrogram.errors import FloodWait
 from supabase import create_client, Client as SupabaseClient
 import imageio_ffmpeg
 import subprocess
+import yt_dlp
 
 # Credentials & Supabase Config
 API_ID = int(os.environ.get("API_ID", 38215355))
@@ -54,6 +55,7 @@ USER_VIDEOS = {}
 USER_SETTING_BANNER = set()
 USER_BANNERS = {}
 WAITING_FOR_CLONE_TOKEN = set()
+WAITING_FOR_DOWNLOAD_LINK = set()
 
 @app.on_message(filters.command("start"))
 async def start_command(client, message):
@@ -80,6 +82,16 @@ async def start_command(client, message):
         f"👑 **Developer:** @kage_x_edit\n\n"
         f"Neeche diye gaye buttons se features explore karein:",
         reply_markup=menu_keyboard
+    )
+
+@app.on_callback_query(filters.regex("downloader"))
+async def downloader_callback(client, callback_query):
+    user_id = callback_query.from_user.id
+    WAITING_FOR_DOWNLOAD_LINK.add(user_id)
+    await callback_query.message.edit_text(
+        "📥 **Universal Link Downloader**\n\n"
+        "Bhai, YouTube, Instagram, ya Telegram ka koi bhi link yahan direct bhej do! Bot media download karke bhej dega.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]])
     )
 
 @app.on_callback_query(filters.regex("compress_menu"))
@@ -112,6 +124,7 @@ async def back_to_menu(client, callback_query):
     user_id = callback_query.from_user.id
     USER_SETTING_BANNER.discard(user_id)
     WAITING_FOR_CLONE_TOKEN.discard(user_id)
+    WAITING_FOR_DOWNLOAD_LINK.discard(user_id)
         
     menu_keyboard = InlineKeyboardMarkup([
         [
@@ -132,70 +145,111 @@ async def back_to_menu(client, callback_query):
         reply_markup=menu_keyboard
     )
 
-# 📥 RESTRICTED LINK DOWNLOADER HANDLER
-@app.on_message(filters.regex(r"https?://t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)") & filters.private)
-async def restricted_link_handler(client, message):
-    if not userbot:
-        await message.reply_text("❌ Restricted downloader ke liye `SESSION_STRING` configured nahi hai!")
-        return
-
+# 📥 UNIVERSAL DOWNLOADER (Instagram, YouTube & Telegram)
+@app.on_message(filters.regex(r"https?://") & filters.private)
+async def universal_link_handler(client, message):
     link = message.text.strip()
-    match = re.search(r"t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)", link)
-    if not match:
-        return
-        
-    chat_identifier = match.group(1)
-    msg_id = int(match.group(2))
-    chat_id = int("-100" + chat_identifier) if chat_identifier.isdigit() else "@" + chat_identifier
-        
-    progress_msg = await message.reply_text("📥 **Connecting & Fetching content...**")
+    
+    # Check if it's a Telegram link
+    if "t.me/" in link:
+        if not userbot:
+            await message.reply_text("❌ Telegram downloader ke liye `SESSION_STRING` configured nahi hai!")
+            return
 
-    try:
-        try:
-            await userbot.get_chat(chat_id)
-        except Exception:
-            try:
-                await userbot.join_chat(chat_identifier if not chat_identifier.isdigit() else int("-100" + chat_identifier))
-            except Exception:
-                pass
-
-        target_msg = await userbot.get_messages(chat_id, msg_id)
-        if not target_msg or target_msg.empty:
-            await progress_msg.edit("❌ Ye message nahi mila ya channel private/restricted hai!")
+        match = re.search(r"t\.me/(?:c/)?([a-zA-Z0-9_]+)/(\d+)", link)
+        if not match:
+            await message.reply_text("❌ Invalid Telegram link format!")
             return
             
-        if target_msg.media:
-            file_path = await target_msg.download()
-            await progress_msg.edit("📤 **Uploading to your chat...**")
+        chat_identifier = match.group(1)
+        msg_id = int(match.group(2))
+        chat_id = int("-100" + chat_identifier) if chat_identifier.isdigit() else "@" + chat_identifier
             
-            if target_msg.video:
-                thumb_path = None
-                if target_msg.video.thumbs:
-                    try:
-                        thumb_path = await userbot.download_media(target_msg.video.thumbs[0].file_id)
-                    except Exception:
-                        pass
+        progress_msg = await message.reply_text("📥 **Fetching Telegram content...**")
+
+        try:
+            try:
+                await userbot.get_chat(chat_id)
+            except Exception:
+                try:
+                    await userbot.join_chat(chat_identifier if not chat_identifier.isdigit() else int("-100" + chat_identifier))
+                except Exception:
+                    pass
+
+            target_msg = await userbot.get_messages(chat_id, msg_id)
+            if not target_msg or target_msg.empty:
+                await progress_msg.edit("❌ Ye message nahi mila ya channel private/restricted hai!")
+                return
                 
-                await client.send_video(
-                    chat_id=message.chat.id, video=file_path, thumb=thumb_path,
-                    duration=target_msg.video.duration, width=target_msg.video.width,
-                    height=target_msg.video.height, supports_streaming=True, caption=target_msg.caption or ""
-                )
-                if thumb_path and os.path.exists(thumb_path):
-                    os.remove(thumb_path)
-            elif target_msg.document:
-                await client.send_document(chat_id=message.chat.id, document=file_path, caption=target_msg.caption or "")
-            elif target_msg.photo:
-                await client.send_photo(chat_id=message.chat.id, photo=file_path, caption=target_msg.caption or "")
+            if target_msg.media:
+                file_path = await target_msg.download()
+                await progress_msg.edit("📤 **Uploading to your chat...**")
+                
+                if target_msg.video:
+                    thumb_path = None
+                    if target_msg.video.thumbs:
+                        try:
+                            thumb_path = await userbot.download_media(target_msg.video.thumbs[0].file_id)
+                        except Exception:
+                            pass
+                    
+                    await client.send_video(
+                        chat_id=message.chat.id, video=file_path, thumb=thumb_path,
+                        duration=target_msg.video.duration, width=target_msg.video.width,
+                        height=target_msg.video.height, supports_streaming=True, caption=target_msg.caption or ""
+                    )
+                    if thumb_path and os.path.exists(thumb_path):
+                        os.remove(thumb_path)
+                elif target_msg.document:
+                    await client.send_document(chat_id=message.chat.id, document=file_path, caption=target_msg.caption or "")
+                elif target_msg.photo:
+                    await client.send_photo(chat_id=message.chat.id, photo=file_path, caption=target_msg.caption or "")
+                
+                if file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+            else:
+                await client.send_message(chat_id=message.chat.id, text=target_msg.text or "")
+                
+            await progress_msg.delete()
+        except Exception as e:
+            await progress_msg.edit(f"❌ Error: `{str(e)}`")
             
-            if file_path and os.path.exists(file_path):
-                os.remove(file_path)
-        else:
-            await client.send_message(chat_id=message.chat.id, text=target_msg.text or "")
+    else:
+        # Instagram, YouTube & Other platforms using yt-dlp
+        progress_msg = await message.reply_text("📥 **Downloading from Social Media (YT/Insta)...**")
+        output_template = f"downloaded_{message.from_user.id}.%(ext)s"
+        
+        ydl_opts = {
+            'format': 'best',
+            'outtmpl': output_template,
+            'max_filesize': 500 * 1024 * 1024, # Limit to 500MB to avoid crashes
+        }
+        
+        downloaded_file = None
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(link, download=True)
+                downloaded_file = ydl.prepare_filename(info)
+                
+            await progress_msg.edit("📤 **Uploading media file...**")
             
-        await progress_msg.delete()
-    except Exception as e:
-        await progress_msg.edit(f"❌ Error aagaya bhai: `{str(e)}`")
+            if downloaded_file and os.path.exists(downloaded_file):
+                if downloaded_file.endswith(('.mp4', '.mkv', '.webm', '.mov')):
+                    await client.send_video(chat_id=message.chat.id, video=downloaded_file, supports_streaming=True)
+                elif downloaded_file.endswith(('.jpg', '.jpeg', '.png', '.webp')):
+                    await client.send_photo(chat_id=message.chat.id, photo=downloaded_file)
+                else:
+                    await client.send_document(chat_id=message.chat.id, document=downloaded_file)
+                    
+                os.remove(downloaded_file)
+            else:
+                await progress_msg.edit("❌ File download nahi ho payi!")
+                
+            await progress_msg.delete()
+        except Exception as e:
+            await progress_msg.edit(f"❌ Download Error: `{str(e)}`")
+            if downloaded_file and os.path.exists(downloaded_file):
+                os.remove(downloaded_file)
 
 @app.on_message(filters.photo & filters.private)
 async def receive_photo(client, message):
@@ -244,6 +298,26 @@ async def receive_video_for_compression(client, message):
         reply_markup=quality_keyboard
     )
 
+@app.on_message(filters.text & filters.private)
+async def receive_text_input(client, message):
+    user_id = message.from_user.id
+    text = message.text.strip()
+    if text.startswith("/") or text.startswith("http"):
+        return
+
+    if user_id in WAITING_FOR_CLONE_TOKEN:
+        WAITING_FOR_CLONE_TOKEN.remove(user_id)
+        try:
+            supabase.table("clones").insert({
+                "user_id": user_id,
+                "bot_token": text,
+                "bot_name": f"Clone_{user_id}"
+            }).execute()
+            await message.reply_text("✅ **Clone Bot Successfully Added!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="clone_menu")]]))
+        except Exception as e:
+            await message.reply_text(f"❌ Error: `{str(e)}`")
+        return
+
 # ⚙️ COMPRESSION & FULL HD OVERLAY PROCESSOR
 async def compress_and_send(client, callback_query, mode):
     user_id = callback_query.from_user.id
@@ -273,12 +347,12 @@ async def compress_and_send(client, callback_query, mode):
         elif mode == "comp_720p":
             qualities_to_process = [("720p", "scale=-2:720", "26")]
         elif mode == "comp_1080p":
-            qualities_to_process = [("1080p", "scale=-2:1080", "28")] # Fixed to 28 for heavy compression
+            qualities_to_process = [("1080p", "scale=-2:1080", "28")]
         elif mode == "comp_all":
             qualities_to_process = [
                 ("360p", "scale=-2:360", "28"),
                 ("720p", "scale=-2:720", "26"),
-                ("1080p", "scale=-2:1080", "28") # Fixed to 28 for heavy compression
+                ("1080p", "scale=-2:1080", "28")
             ]
 
         for q_label, scale_filter, crf_val in qualities_to_process:
