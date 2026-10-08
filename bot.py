@@ -100,10 +100,14 @@ async def start_command(client, message):
         )
         return
 
+    # Main menu with separate Thumbnail option and Compressor Studio
     menu_buttons = [
         [
             InlineKeyboardButton("📥 Downloader (YT/Insta)", callback_data="downloader"),
             InlineKeyboardButton("🗜️ Video Compressor Studio", callback_data="compress_menu")
+        ],
+        [
+            InlineKeyboardButton("🖼️ Set Custom Thumbnail (Alag Option)", callback_data="set_banner_menu")
         ]
     ]
 
@@ -251,12 +255,29 @@ async def compress_menu(client, callback_query):
     log_activity(user_id, callback_query.from_user.username, "OPEN_MENU", "Opened Video Compressor Studio")
     
     await callback_query.message.edit_text(
-        "🗜 **Video Compressor Studio**\n"
+        "🗜 **Video Compressor Studio (Clean)**\n"
         "👑 **Developer:** @kage_x_edit\n\n"
-        "Bhai, apni video yahan direct bhej do. Bot 360p, 720p, 1080p aur All-in-3 options mein heavy compression ke sath file dega!",
+        "Bhai, apni video yahan direct bhej do. Bot 360p, 720p, 1080p options mein bina kisi thumbnail ke clean heavy compression dega!",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅ Back to Menu", callback_data="back_to_menu")]
         ])
+    )
+
+@app.on_callback_query(filters.regex("set_banner_menu"))
+async def set_banner_menu(client, callback_query):
+    user_id = callback_query.from_user.id
+    if not is_authorized(user_id):
+        await callback_query.answer("❌ Aapke paas access nahi hai!", show_alert=True)
+        return
+        
+    USER_SETTING_BANNER.add(user_id)
+    banner_path = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
+    has_banner = os.path.exists(banner_path)
+    status_text = "🟢 **Custom thumbnail saved hai!**" if has_banner else "🔴 **Koi thumbnail saved nahi hai.**"
+    
+    await callback_query.message.edit_text(
+        f"🖼 **Custom Thumbnail Setup (Alag Option)**\n\n{status_text}\n\nApni Thumbnail image yahan bhej do (Yeh compression se alag rakhi gayi hai):",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]])
     )
 
 @app.on_callback_query(filters.regex("back_to_menu"))
@@ -265,12 +286,16 @@ async def back_to_menu(client, callback_query):
     if not is_authorized(user_id):
         return
         
+    USER_SETTING_BANNER.discard(user_id)
     WAITING_FOR_DOWNLOAD_LINK.discard(user_id)
     
     menu_buttons = [
         [
             InlineKeyboardButton("📥 Downloader (YT/Insta)", callback_data="downloader"),
             InlineKeyboardButton("🗜️ Video Compressor Studio", callback_data="compress_menu")
+        ],
+        [
+            InlineKeyboardButton("🖼️ Set Custom Thumbnail (Alag Option)", callback_data="set_banner_menu")
         ]
     ]
 
@@ -398,7 +423,25 @@ async def universal_link_handler(client, message):
         except Exception as e:
             await progress_msg.edit(f"❌ Download Error: `{str(e)}`")
 
-# 🎬 RECEIVE VIDEO & SHOW QUALITY OPTIONS
+@app.on_message(filters.photo & filters.private)
+async def receive_photo(client, message):
+    user_id = message.from_user.id
+    if not is_authorized(user_id):
+        return
+
+    if user_id in USER_SETTING_BANNER:
+        USER_SETTING_BANNER.remove(user_id)
+        banner_path = f"banner_{user_id}.png"
+        downloaded_banner = await message.download(file_name=banner_path)
+        USER_BANNERS[user_id] = downloaded_banner or banner_path
+        
+        log_activity(user_id, message.from_user.username, "SET_THUMBNAIL", "Saved Custom Thumbnail Separately")
+        await message.reply_text(
+            "✅ **Thumbnail Saved Successfully (Alag Option)!**\nYeh thumbnail compression se bilkul alag rakhi gayi hai.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
+        )
+
+# 🎬 RECEIVE VIDEO & SHOW QUALITY OPTIONS (CLEAN COMPRESSION)
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video_for_compression(client, message):
     user_id = message.from_user.id
@@ -428,11 +471,11 @@ async def receive_video_for_compression(client, message):
     await message.reply_text(
         f"🎬 **Video Received!**\n"
         f"📁 File: `{file_name}`\n\n"
-        f"Select compression quality to reduce MB/GB instantly:",
+        f"Select compression quality to reduce MB/GB instantly (Clean Video - No Thumbnail):",
         reply_markup=quality_keyboard
     )
 
-# ⚙️ COMPRESSION & SEND WITHOUT THUMBNAIL
+# ⚙️ CLEAN COMPRESSION & SEND (WITHOUT THUMBNAIL)
 async def compress_and_send(client, callback_query, mode):
     user_id = callback_query.from_user.id
     username = callback_query.from_user.username or callback_query.from_user.first_name
@@ -538,7 +581,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.wfile.write(b"Kage x Bot is active and running!") if hasattr(self.wfile, 'wfile') else self.wfile.write(b"Kage x Bot is active and running!")
+        self.wfile.write(b"Kage x Bot is active and running!")
     def log_message(self, format, *args):
         return
 
