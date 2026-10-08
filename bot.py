@@ -59,10 +59,10 @@ USER_VIDEOS = {}
 USER_SETTING_BANNER = set()
 USER_BANNERS = {}
 WAITING_FOR_DOWNLOAD_LINK = set()
-WAITING_FOR_DUB_EPISODE = set()
+WAITING_FOR_MAIN_EPISODE = set()
+WAITING_FOR_DUB_CLIPS = set()
 
-# Dub Studio Session Storage: {user_id: {"episode": path, "clips": []}}
-DUB_SESSIONS = {}
+DUB_STUDIO_DATA = {}
 
 def is_authorized(user_id):
     if user_id == MAIN_OWNER:
@@ -137,7 +137,7 @@ async def request_access_handler(client, callback_query):
     username = callback_query.from_user.username or callback_query.from_user.first_name
     
     await callback_query.answer("✅ Request main owner ke paas bhej di gayi hai!", show_alert=True)
-    await callback_query.message.edit_text("⏳ **Request Sent!** Owner ki approval ka intezaar karein.")
+    await callback_query.message.edit_text("⏳ **Request Sent!** Owner ki approval ka intezaار karein.")
     
     try:
         await client.send_message(
@@ -274,85 +274,17 @@ async def dub_studio_callback(client, callback_query):
         await callback_query.answer("❌ Aapke paas access nahi hai!", show_alert=True)
         return
         
-    WAITING_FOR_DUB_EPISODE.add(user_id)
-    DUB_SESSIONS[user_id] = {"episode": None, "clips": []}
+    WAITING_FOR_MAIN_EPISODE.add(user_id)
     log_activity(user_id, callback_query.from_user.username, "OPEN_MENU", "Opened Dub Sync & Mix Studio")
     
     await callback_query.message.edit_text(
         "🎬 **Dub Sync & Mix Studio**\n"
         "👑 **Developer:** @kage_x_edit\n\n"
-        "Bhai, sabse pehle apna **Main Anime Episode Video (~24 min)** yahan bhej do. Uske baad yeh audio mute karke save kar lega!",
+        "Bhai, sabse pehle apna **Main Episode Video** alag se bhej do taaki bot uska audio mute karke ready kar sake:",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]
         ])
     )
-
-@app.on_callback_query(filters.regex("process_dub_mix"))
-async def process_dub_mix_callback(client, callback_query):
-    user_id = callback_query.from_user.id
-    if user_id not in DUB_SESSIONS or not DUB_SESSIONS[user_id]["episode"]:
-        await callback_query.answer("❌ Pehle Main Episode bhejo!", show_alert=True)
-        return
-        
-    session = DUB_SESSIONS[user_id]
-    episode_path = session["episode"]
-    clips = session["clips"]
-    
-    if not os.path.exists(episode_path):
-        await callback_query.answer("❌ Main episode file expire ho gayi hai, dubara shuru karein!", show_alert=True)
-        return
-
-    status_msg = await callback_query.message.edit_text(f"⚙️ **Processing Dub Mix:** {len(clips)} clips found. Merging and balancing audio...")
-    output_final = f"final_dubbed_{user_id}.mp4"
-    
-    try:
-        if not clips:
-            os.rename(episode_path, output_final)
-        else:
-            inputs = ["-i", episode_path]
-            filter_inputs = ""
-            for i, clip in enumerate(clips):
-                if os.path.exists(clip):
-                    inputs.extend(["-i", clip])
-                    filter_inputs += f"[{i+1}:a]"
-            
-            if filter_inputs:
-                filter_complex = f"{filter_inputs}concat=n={len(clips)}:v=0:a=1[outa]"
-                command = [
-                    FFMPEG_PATH, *inputs,
-                    "-filter_complex", filter_complex,
-                    "-map", "0:v", "-map", "[outa]",
-                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-                    "-movflags", "+faststart",
-                    output_final, "-y"
-                ]
-                process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                await process.wait()
-            
-            if not os.path.exists(output_final) or os.path.getsize(output_final) < 1024:
-                output_final = episode_path
-        
-        await status_msg.edit("📤 **Uploading Final Dubbed & Mixed Episode...**")
-        await client.send_video(
-            chat_id=callback_query.message.chat.id,
-            video=output_final,
-            supports_streaming=True,
-            caption="🎬 **Final Hindi Dubbed Episode (Synced, Noise-Free & Balanced)**"
-        )
-        await status_msg.delete()
-        
-    except Exception as e:
-        await status_msg.edit(f"❌ Dub Mix Error: `{str(e)}`")
-    finally:
-        if os.path.exists(episode_path):
-            os.remove(episode_path)
-        for c in clips:
-            if os.path.exists(c):
-                os.remove(c)
-        if os.path.exists(output_final) and output_final != episode_path:
-            os.remove(output_final)
-        if user_id in DUB_SESSIONS:
-            del DUB_SESSIONS[user_id]
 
 @app.on_callback_query(filters.regex("set_banner_menu"))
 async def set_banner_menu(client, callback_query):
@@ -379,9 +311,10 @@ async def back_to_menu(client, callback_query):
         
     USER_SETTING_BANNER.discard(user_id)
     WAITING_FOR_DOWNLOAD_LINK.discard(user_id)
-    WAITING_FOR_DUB_EPISODE.discard(user_id)
-    if user_id in DUB_SESSIONS:
-        del DUB_SESSIONS[user_id]
+    WAITING_FOR_MAIN_EPISODE.discard(user_id)
+    WAITING_FOR_DUB_CLIPS.discard(user_id)
+    if user_id in DUB_STUDIO_DATA:
+        del DUB_STUDIO_DATA[user_id]
     
     menu_buttons = [
         [
@@ -536,7 +469,7 @@ async def receive_photo(client, message):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
         )
 
-# 🎬 RECEIVE VIDEO & HANDLE DUB STUDIO OR COMPRESSION
+# 🎬 DUB STUDIO & VIDEO COMPRESSION HANDLER
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video_handler(client, message):
     user_id = message.from_user.id
@@ -547,17 +480,15 @@ async def receive_video_handler(client, message):
     if message.document and not message.document.mime_type.startswith("video"):
         return
 
-    # Check if user is actively in Dub Studio Mode
-    if user_id in WAITING_FOR_DUB_EPISODE or (user_id in DUB_SESSIONS):
-        if user_id not in DUB_SESSIONS:
-            DUB_SESSIONS[user_id] = {"episode": None, "clips": []}
-
-        if not DUB_SESSIONS[user_id]["episode"]:
-            # Step 1: Receiving Main Episode
-            status_msg = await message.reply_text("📥 **Downloading Main Episode & muting audio...**")
-            input_path = f"dub_episode_{user_id}.mp4"
-            muted_path = f"muted_episode_{user_id}.mp4"
-            
+    # Step 1: Receiving Main Episode in Dub Studio
+    if user_id in WAITING_FOR_MAIN_EPISODE:
+        WAITING_FOR_MAIN_EPISODE.remove(user_id)
+        status_msg = await message.reply_text("📥 **Downloading Main Episode & muting original audio...**")
+        
+        input_path = f"main_ep_{user_id}.mp4"
+        muted_path = f"muted_ep_{user_id}.mp4"
+        
+        try:
             await message.download(file_name=input_path)
             
             command = [
@@ -571,33 +502,36 @@ async def receive_video_handler(client, message):
             if os.path.exists(input_path):
                 os.remove(input_path)
                 
-            DUB_SESSIONS[user_id]["episode"] = muted_path
-            if user_id in WAITING_FOR_DUB_EPISODE:
-                WAITING_FOR_DUB_EPISODE.remove(user_id)
+            DUB_STUDIO_DATA[user_id] = {"episode": muted_path, "clips": []}
+            WAITING_FOR_DUB_CLIPS.add(user_id)
             
             await status_msg.edit(
-                "✅ **Main Episode Saved & Muted!**\n\n"
-                "Ab apni **Dubbed Clips** ek-ek karke yahan bhejte jao. Saari clips bhejne ke baad niche diye gaye button par click karein:",
+                "✅ **Main Episode Muted Successfully!**\n\n"
+                "Ab apni **saari Dubbed Clips ek sath (multiple select karke)** yahan bhej do aur bhejne ke baad niche button dabao:",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🚀 Process & Merge Dub Mix", callback_data="process_dub_mix")],
+                    [InlineKeyboardButton("🚀 Mix & Process Dubbed Episode", callback_data="process_dub_final")],
                     [InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")]
                 ])
             )
-        else:
-            # Step 2: Receiving Dubbed Clips one by one
-            clip_path = await message.download(file_name=f"clip_{user_id}_{int(time.time())}.mp4")
-            DUB_SESSIONS[user_id]["clips"].append(clip_path)
-            count = len(DUB_SESSIONS[user_id]["clips"])
-            
-            await message.reply_text(
-                f"✅ **Dubbed Clip #{count} Received & Saved!**\n\n"
-                f"Aur clips bhejo, ya phir mix karne ke liye button dabao:",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(f"🚀 Process & Merge Dub Mix ({count} Clips)", callback_data="process_dub_mix")],
-                    [InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")]
-                ])
-            )
-        return  # IMPORTANT: Prevent falling into compression flow!
+        except Exception as e:
+            await status_msg.edit(f"❌ Error: `{str(e)}`")
+        return
+
+    # Step 2: Receiving Dubbed Clips (User can send multiple clips)
+    if user_id in WAITING_FOR_DUB_CLIPS:
+        clip_path = await message.download(file_name=f"clip_{user_id}_{int(time.time())}_{len(DUB_STUDIO_DATA[user_id]['clips'])}.mp4")
+        DUB_STUDIO_DATA[user_id]["clips"].append(clip_path)
+        count = len(DUB_STUDIO_DATA[user_id]["clips"])
+        
+        await message.reply_text(
+            f"✅ **Dubbed Clip #{count} Added!**\n"
+            f"Agar aur clips hain toh bhejte jao, warna niche mix button par click karo:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"🚀 Mix & Process Dubbed Episode ({count} Clips)", callback_data="process_dub_final")],
+                [InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")]
+            ])
+        )
+        return
 
     # Standard Video Compression Flow
     USER_VIDEOS[user_id] = message
@@ -622,6 +556,80 @@ async def receive_video_handler(client, message):
         f"Select compression quality:",
         reply_markup=quality_keyboard
     )
+
+# ⚙️ PROCESS & MERGE DUBBED MIX FINAL CALLBACK
+@app.on_callback_query(filters.regex("process_dub_final"))
+async def process_dub_final_callback(client, callback_query):
+    user_id = callback_query.from_user.id
+    if user_id not in DUB_STUDIO_DATA or not DUB_STUDIO_DATA[user_id]["episode"]:
+        await callback_query.answer("❌ Pehle Main Episode bhejo!", show_alert=True)
+        return
+        
+    session = DUB_STUDIO_DATA[user_id]
+    episode_path = session["episode"]
+    clips = session["clips"]
+    
+    if not os.path.exists(episode_path):
+        await callback_query.answer("❌ Episode file expire ho gayi, dubara shuru karein!", show_alert=True)
+        return
+
+    status_msg = await callback_query.message.edit_text(f"⚙️ **Processing Dub Mix:** {len(clips)} clips received. Removing noise & merging audio...")
+    output_final = f"final_synced_episode_{user_id}.mp4"
+    
+    try:
+        if not clips:
+            os.rename(episode_path, output_final)
+        else:
+            # Build ffmpeg inputs for muted episode and audio clips
+            inputs = ["-i", episode_path]
+            filter_inputs = ""
+            for i, clip in enumerate(clips):
+                if os.path.exists(clip):
+                    inputs.extend(["-i", clip])
+                    # Apply noise reduction (afftdn) and volume normalization to each audio clip stream
+                    filter_inputs += f"[{i+1}:a]afftdn,volume=1.2[a{i}];"
+            
+            concat_str = "".join([f"[a{i}]" for i in range(len(clips))])
+            filter_complex = f"{filter_inputs}{concat_str}concat=n={len(clips)}:v=0:a=1[outa]"
+            
+            command = [
+                FFMPEG_PATH, *inputs,
+                "-filter_complex", filter_complex,
+                "-map", "0:v", "-map", "[outa]",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                "-movflags", "+faststart",
+                output_final, "-y"
+            ]
+            
+            process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            await process.wait()
+            
+            if not os.path.exists(output_final) or os.path.getsize(output_final) < 1024:
+                output_final = episode_path
+        
+        await status_msg.edit("📤 **Uploading Final Synced & Balanced Dubbed Episode...**")
+        await client.send_video(
+            chat_id=callback_query.message.chat.id,
+            video=output_final,
+            supports_streaming=True,
+            caption="🎬 **Final Hindi Dubbed Anime Episode (Noise-Free, Balanced & Synced)**"
+        )
+        await status_msg.delete()
+        
+    except Exception as e:
+        await status_msg.edit(f"❌ Dub Mix Processing Error: `{str(e)}`")
+    finally:
+        # Cleanup temporary files
+        if os.path.exists(episode_path):
+            os.remove(episode_path)
+        for c in clips:
+            if os.path.exists(c):
+                os.remove(c)
+        if os.path.exists(output_final) and output_final != episode_path:
+            os.remove(output_final)
+        if user_id in DUB_STUDIO_DATA:
+            del DUB_STUDIO_DATA[user_id]
+        WAITING_FOR_DUB_CLIPS.discard(user_id)
 
 # ⚙️ CLEAN COMPRESSION & SEND
 async def compress_and_send(client, callback_query, mode):
