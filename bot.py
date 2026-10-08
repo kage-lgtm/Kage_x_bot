@@ -70,7 +70,6 @@ def is_authorized(user_id):
         return False
 
 def log_activity(user_id, username, action_type, details):
-    """Supabase database mein user activity record karta hai"""
     try:
         supabase.table("user_activity_logs").insert({
             "user_id": user_id,
@@ -101,7 +100,6 @@ async def start_command(client, message):
         )
         return
 
-    # Menu options for Authorized Users & Owner
     menu_buttons = [
         [
             InlineKeyboardButton("📥 Downloader (YT/Insta)", callback_data="downloader"),
@@ -112,7 +110,6 @@ async def start_command(client, message):
         ]
     ]
 
-    # Extra options visible ONLY to Main Owner
     if user_id == MAIN_OWNER:
         menu_buttons.append([
             InlineKeyboardButton("📊 View Activity Logs", callback_data="view_logs"),
@@ -170,7 +167,6 @@ async def grant_access(client, message):
     except Exception as e:
         await message.reply_text(f"❌ Error: `{str(e)}`")
 
-# 👑 MAIN OWNER COMMAND TO CHECK USER ACTIVITIES
 @app.on_message(filters.command("logs") & filters.private)
 async def view_user_logs(client, message):
     if message.from_user.id != MAIN_OWNER:
@@ -280,7 +276,7 @@ async def set_banner_menu(client, callback_query):
     status_text = "🟢 **Custom thumbnail saved hai!**" if has_banner else "🔴 **Koi thumbnail saved nahi hai.**"
     
     await callback_query.message.edit_text(
-        f"🖼 **Custom Thumbnail Setup (Full HD)**\n\n{status_text}\n\nApni HD Thumbnail/Logo image yahan bhej do!",
+        f"🖼 **Custom Thumbnail Setup (Poster)**\n\n{status_text}\n\nApni Poster/Thumbnail image yahan bhej do!",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]])
     )
 
@@ -329,7 +325,6 @@ async def universal_link_handler(client, message):
     link = message.text.strip()
     log_activity(user_id, username, "DOWNLOAD_LINK", f"Link: {link}")
 
-    # Check if it's a Telegram link (Restricted content) -> ONLY FOR MAIN OWNER
     if "t.me/" in link:
         if user_id != MAIN_OWNER:
             await message.reply_text("❌ Restricted / Saved Telegram content download karne ka access sirf Main Owner ke paas hai!")
@@ -368,21 +363,15 @@ async def universal_link_handler(client, message):
                 file_path = await target_msg.download()
                 await progress_msg.edit("📤 **Uploading to your chat...**")
                 
+                banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
+                thumb_path = banner_file if os.path.exists(banner_file) else None
+                
                 if target_msg.video:
-                    thumb_path = None
-                    if target_msg.video.thumbs:
-                        try:
-                            thumb_path = await userbot.download_media(target_msg.video.thumbs[0].file_id)
-                        except Exception:
-                            pass
-                    
                     await client.send_video(
                         chat_id=message.chat.id, video=file_path, thumb=thumb_path,
                         duration=target_msg.video.duration, width=target_msg.video.width,
                         height=target_msg.video.height, supports_streaming=True, caption=target_msg.caption or ""
                     )
-                    if thumb_path and os.path.exists(thumb_path):
-                        os.remove(thumb_path)
                 elif target_msg.document:
                     await client.send_document(chat_id=message.chat.id, document=file_path, caption=target_msg.caption or "")
                 elif target_msg.photo:
@@ -398,7 +387,6 @@ async def universal_link_handler(client, message):
             await progress_msg.edit(f"❌ Error: `{str(e)}`")
             
     else:
-        # Public Social Media (YouTube, Instagram) available for all authorized users
         progress_msg = await message.reply_text("📥 **Downloading media from link (Insta/YT)...**")
         ydl_opts = {
             'outtmpl': f'downloaded_{message.from_user.id}.%(ext)s',
@@ -422,9 +410,12 @@ async def universal_link_handler(client, message):
 
             if downloaded_files:
                 await progress_msg.edit("📤 **Uploading media file(s)...**")
+                banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
+                thumb_path = banner_file if os.path.exists(banner_file) else None
+
                 for file_path in downloaded_files:
                     if file_path.endswith(('.mp4', '.mkv', '.webm', '.mov')):
-                        await client.send_video(chat_id=message.chat.id, video=file_path, supports_streaming=True)
+                        await client.send_video(chat_id=message.chat.id, video=file_path, thumb=thumb_path, supports_streaming=True)
                     elif file_path.endswith(('.jpg', '.jpeg', '.png', '.webp', '.jfif')):
                         await client.send_photo(chat_id=message.chat.id, photo=file_path)
                     else:
@@ -450,13 +441,13 @@ async def receive_photo(client, message):
         downloaded_banner = await message.download(file_name=banner_path)
         USER_BANNERS[user_id] = downloaded_banner or banner_path
         
-        log_activity(user_id, message.from_user.username, "SET_THUMBNAIL", "Updated Custom Full HD Thumbnail")
+        log_activity(user_id, message.from_user.username, "SET_THUMBNAIL", "Updated Custom Poster Thumbnail")
         await message.reply_text(
-            "✅ **Full HD Thumbnail Saved Successfully!**",
+            "✅ **Poster Thumbnail Saved Successfully!**\nAb koi bhi video compress ya download karoge, toh yeh poster uske cover/thumbnail par set ho jayega.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
         )
 
-# 🎬 RECEIVE VIDEO & SHOW QUALITY OPTIONS WITH SUPABASE LOGGING
+# 🎬 RECEIVE VIDEO & SHOW QUALITY OPTIONS
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video_for_compression(client, message):
     user_id = message.from_user.id
@@ -490,7 +481,7 @@ async def receive_video_for_compression(client, message):
         reply_markup=quality_keyboard
     )
 
-# ⚙️ COMPRESSION & SUPABASE LOGGING PROCESSOR
+# ⚙️ COMPRESSION & SEND WITH POSTER THUMBNAIL (NO OVERLAY INSIDE VIDEO)
 async def compress_and_send(client, callback_query, mode):
     user_id = callback_query.from_user.id
     username = callback_query.from_user.username or callback_query.from_user.first_name
@@ -519,7 +510,6 @@ async def compress_and_send(client, callback_query, mode):
     
     try:
         downloaded_path = await msg.download(file_name=input_file)
-        has_banner = os.path.exists(banner_file)
         
         qualities_to_process = []
         if mode == "comp_360p":
@@ -536,27 +526,17 @@ async def compress_and_send(client, callback_query, mode):
             ]
 
         for q_label, scale_filter, crf_val in qualities_to_process:
-            await status_msg.edit(f"⚙️ **Compressing to {q_label} with Full HD Thumbnail...**")
+            await status_msg.edit(f"⚙️ **Compressing to {q_label}...**")
             output_file = f"output_{user_id}_{q_label}.mp4"
             
-            if has_banner:
-                filter_complex = f"[0:v]{scale_filter}[v_scaled];[1:v]scale=-1:80:flags=lanczos[banner];[v_scaled][banner]overlay=W-w-20:20[v]"
-                command = [
-                    FFMPEG_PATH, "-i", downloaded_path, "-i", banner_file,
-                    "-filter_complex", filter_complex,
-                    "-map", "[v]", "-map", "0:a?",
-                    "-c:v", "libx264", "-crf", crf_val, "-preset", "veryfast",
-                    "-c:a", "aac", "-b:a", "96k",
-                    output_file, "-y"
-                ]
-            else:
-                command = [
-                    FFMPEG_PATH, "-i", downloaded_path,
-                    "-vf", scale_filter,
-                    "-c:v", "libx264", "-crf", crf_val, "-preset", "veryfast",
-                    "-c:a", "aac", "-b:a", "96k",
-                    output_file, "-y"
-                ]
+            # Clean compression without any video overlay inside
+            command = [
+                FFMPEG_PATH, "-i", downloaded_path,
+                "-vf", scale_filter,
+                "-c:v", "libx264", "-crf", crf_val, "-preset", "veryfast",
+                "-c:a", "aac", "-b:a", "96k",
+                output_file, "-y"
+            ]
                 
             process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             await process.wait()
@@ -571,8 +551,9 @@ async def compress_and_send(client, callback_query, mode):
                 os.remove(final_path)
             os.rename(final_output, final_path)
             
-            thumb_path = banner_file if has_banner else None
-            await status_msg.edit(f"📤 **Sending {q_label} compressed video...**")
+            # Set poster/banner as video thumbnail (cover image) outside video
+            thumb_path = banner_file if os.path.exists(banner_file) else None
+            await status_msg.edit(f"📤 **Sending {q_label} compressed video with Poster Thumbnail...**")
             
             await client.send_video(
                 chat_id=callback_query.message.chat.id,
