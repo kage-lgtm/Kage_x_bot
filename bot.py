@@ -298,40 +298,38 @@ async def process_dub_mix_callback(client, callback_query):
     episode_path = session["episode"]
     clips = session["clips"]
     
+    if not os.path.exists(episode_path):
+        await callback_query.answer("❌ Main episode file expire ho gayi hai, dubara shuru karein!", show_alert=True)
+        return
+
     status_msg = await callback_query.message.edit_text(f"⚙️ **Processing Dub Mix:** {len(clips)} clips found. Merging and balancing audio...")
     output_final = f"final_dubbed_{user_id}.mp4"
     
     try:
         if not clips:
-            # If no clips, just send the muted episode
             os.rename(episode_path, output_final)
         else:
-            # Advanced concat/mixing logic via FFmpeg
-            # We use complex filter to concatenate or mix audio tracks
             inputs = ["-i", episode_path]
             filter_inputs = ""
             for i, clip in enumerate(clips):
-                inputs.extend(["-i", clip])
-                filter_inputs += f"[{i+1}:a]"
+                if os.path.exists(clip):
+                    inputs.extend(["-i", clip])
+                    filter_inputs += f"[{i+1}:a]"
             
-            # If multiple audio clips, we mix/concat them sequentially or overlay
-            # For a robust merge, we concatenate the audio tracks and map with the video
-            filter_complex = f"{filter_inputs}concat=n={len(clips)}:v=0:a=1[outa]"
-            
-            command = [
-                FFMPEG_PATH, *inputs,
-                "-filter_complex", filter_complex,
-                "-map", "0:v", "-map", "[outa]",
-                "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-                "-movflags", "+faststart",
-                output_final, "-y"
-            ]
-            
-            process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-            await process.wait()
+            if filter_inputs:
+                filter_complex = f"{filter_inputs}concat=n={len(clips)}:v=0:a=1[outa]"
+                command = [
+                    FFMPEG_PATH, *inputs,
+                    "-filter_complex", filter_complex,
+                    "-map", "0:v", "-map", "[outa]",
+                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                    "-movflags", "+faststart",
+                    output_final, "-y"
+                ]
+                process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                await process.wait()
             
             if not os.path.exists(output_final) or os.path.getsize(output_final) < 1024:
-                # Fallback if complex concat fails: copy video with first clip audio or similar
                 output_final = episode_path
         
         await status_msg.edit("📤 **Uploading Final Dubbed & Mixed Episode...**")
@@ -346,7 +344,6 @@ async def process_dub_mix_callback(client, callback_query):
     except Exception as e:
         await status_msg.edit(f"❌ Dub Mix Error: `{str(e)}`")
     finally:
-        # Cleanup session files
         if os.path.exists(episode_path):
             os.remove(episode_path)
         for c in clips:
@@ -550,11 +547,12 @@ async def receive_video_handler(client, message):
     if message.document and not message.document.mime_type.startswith("video"):
         return
 
-    # Check if user is in Dub Studio Mode
-    if user_id in WAITING_FOR_DUB_EPISODE:
-        file_name = message.video.file_name if message.video and message.video.file_name else "episode.mp4"
-        
-        if user_id not in DUB_SESSIONS or not DUB_SESSIONS[user_id]["episode"]:
+    # Check if user is actively in Dub Studio Mode
+    if user_id in WAITING_FOR_DUB_EPISODE or (user_id in DUB_SESSIONS):
+        if user_id not in DUB_SESSIONS:
+            DUB_SESSIONS[user_id] = {"episode": None, "clips": []}
+
+        if not DUB_SESSIONS[user_id]["episode"]:
             # Step 1: Receiving Main Episode
             status_msg = await message.reply_text("📥 **Downloading Main Episode & muting audio...**")
             input_path = f"dub_episode_{user_id}.mp4"
@@ -562,7 +560,6 @@ async def receive_video_handler(client, message):
             
             await message.download(file_name=input_path)
             
-            # Mute original audio using FFmpeg
             command = [
                 FFMPEG_PATH, "-i", input_path,
                 "-an", "-c:v", "copy",
@@ -575,7 +572,8 @@ async def receive_video_handler(client, message):
                 os.remove(input_path)
                 
             DUB_SESSIONS[user_id]["episode"] = muted_path
-            WAITING_FOR_DUB_EPISODE.remove(user_id)
+            if user_id in WAITING_FOR_DUB_EPISODE:
+                WAITING_FOR_DUB_EPISODE.remove(user_id)
             
             await status_msg.edit(
                 "✅ **Main Episode Saved & Muted!**\n\n"
@@ -587,7 +585,7 @@ async def receive_video_handler(client, message):
             )
         else:
             # Step 2: Receiving Dubbed Clips one by one
-            clip_path = await message.download(file_name=f"clip_{user_id}_{time.time()}.mp4")
+            clip_path = await message.download(file_name=f"clip_{user_id}_{int(time.time())}.mp4")
             DUB_SESSIONS[user_id]["clips"].append(clip_path)
             count = len(DUB_SESSIONS[user_id]["clips"])
             
@@ -599,7 +597,7 @@ async def receive_video_handler(client, message):
                     [InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")]
                 ])
             )
-        return
+        return  # IMPORTANT: Prevent falling into compression flow!
 
     # Standard Video Compression Flow
     USER_VIDEOS[user_id] = message
@@ -622,7 +620,7 @@ async def receive_video_handler(client, message):
         f"🎬 **Video Received for Compression!**\n"
         f"📁 File: `{file_name}`\n\n"
         f"Select compression quality:",
-        reply_markup=quality_quality_keyboard if 'quality_quality_keyboard' in locals() else quality_keyboard
+        reply_markup=quality_keyboard
     )
 
 # ⚙️ CLEAN COMPRESSION & SEND
