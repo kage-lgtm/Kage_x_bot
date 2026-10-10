@@ -31,7 +31,6 @@ MAIN_OWNER = 5074717463
 # Logging setup
 logging.basicConfig(level=logging.INFO)
 
-# Get internal FFmpeg executable path automatically
 FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 
 # 1️⃣ MAIN BOT CLIENT INITIALIZE
@@ -52,7 +51,6 @@ if SESSION_STRING and len(SESSION_STRING) > 20:
         session_string=SESSION_STRING
     )
 
-# Supabase Database Client Initialize
 supabase: SupabaseClient = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Temporary storage & states
@@ -101,8 +99,7 @@ async def start_command(client, message):
         await message.reply_text(
             f"👋 **Hello {username}!**\n\n"
             f"Welcome to **Kage x Bot** 🚀\n"
-            f"❌ **Access Denied:** Aapke paas is bot ko use karne ki permission nahi hai.\n\n"
-            f"Features use karne ke liye owner se permission lein:",
+            f"❌ **Access Denied:** Aapke paas is bot ko use karne ki permission nahi hai.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📨 Request Access from Owner", callback_data=f"req_access_{user_id}")]
             ])
@@ -127,7 +124,6 @@ async def start_command(client, message):
         ])
 
     menu_keyboard = InlineKeyboardMarkup(menu_buttons)
-
     banner_url = "https://envs.sh/W0K.jpg"
     await message.reply_photo(
         photo=banner_url,
@@ -159,77 +155,20 @@ async def compress_cmd(client, message):
         return
     await message.reply_text("🗜️ **Panda Style Compressor:** Apni video direct chat mein bhej do!")
 
-@app.on_message(filters.command("dub") & filters.private)
-async def dub_cmd(client, message):
-    if not is_authorized(message.from_user.id):
-        return
-    WAITING_FOR_MAIN_EPISODE.add(message.from_user.id)
-    await message.reply_text("🎬 **Dub Studio:** Sabse pehle apna Main Episode Video bhej do!")
-
 @app.on_message(filters.command("setbanner") & filters.private)
 async def setbanner_cmd(client, message):
     if not is_authorized(message.from_user.id):
         return
     USER_SETTING_BANNER.add(message.from_user.id)
-    await message.reply_text("🖼️ **Thumbnail Setup:** Apni custom thumbnail photo bhej do!")
+    await message.reply_text("🖼️ **Thumbnail Setup:** Apni custom thumbnail photo yahan bhej do:")
 
-@app.on_callback_query(filters.regex(r"^req_access_"))
-async def request_access_handler(client, callback_query):
-    user_id = callback_query.from_user.id
-    username = callback_query.from_user.username or callback_query.from_user.first_name
-    
-    await callback_query.answer("✅ Request main owner ke paas bhej di gayi hai!", show_alert=True)
-    await callback_query.message.edit_text("⏳ **Request Sent!** Owner ki approval ka intezaار karein.")
-    
-    try:
-        await client.send_message(
-            chat_id=MAIN_OWNER,
-            text=f"🔔 **New Access Request!**\n\n👤 User: {username} (`{user_id}`)\nCommand: `/grant {user_id}`"
-        )
-    except Exception:
-        pass
-
-@app.on_message(filters.command("grant") & filters.private)
-async def grant_access(client, message):
-    if message.from_user.id != MAIN_OWNER:
-        return
-    parts = message.text.split()
-    if len(parts) < 2:
-        await message.reply_text("❌ Sahi format: `/grant <user_id>`")
-        return
-    try:
-        target_id = int(parts[1])
-        supabase.table("allowed_users").upsert({"user_id": target_id}).execute()
-        await message.reply_text(f"✅ User `{target_id}` ko access mil gaya hai!")
-        try:
-            await client.send_message(target_id, "🎉 **Aapki Access Request Approve ho gayi hai!** Ab aap `/start` bhej kar bot use kar sakte hain.")
-        except Exception:
-            pass
-    except Exception as e:
-        await message.reply_text(f"❌ Error: `{str(e)}`")
-
-@app.on_callback_query(filters.regex("view_logs"))
-async def view_logs_callback(client, callback_query):
-    if callback_query.from_user.id != MAIN_OWNER:
-        await callback_query.answer("❌ Unauthorized!", show_alert=True)
-        return
-    try:
-        res = supabase.table("user_activity_logs").select("*").order("id", desc=True).limit(8).execute()
-        logs = res.data or []
-        text = "📊 **Recent User Activities:**\n\n"
-        for log in logs:
-            text += f"👤 `{log.get('username')}` | ⚙️ `{log.get('action_type')}`\n🕒 `{log.get('timestamp')}`\n\n"
-        await callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu")]]))
-    except Exception as e:
-        await callback_query.answer(f"❌ Error: {str(e)}", show_alert=True)
-
-@app.on_callback_query(filters.regex("downloader"))
-async def downloader_callback(client, callback_query):
+@app.on_callback_query(filters.regex("set_banner_menu"))
+async def set_banner_menu(client, callback_query):
     if not is_authorized(callback_query.from_user.id):
         return
-    WAITING_FOR_DOWNLOAD_LINK.add(callback_query.from_user.id)
+    USER_SETTING_BANNER.add(callback_query.from_user.id)
     await callback_query.message.edit_text(
-        "📥 **Universal Link Downloader**\n\nYouTube ya Instagram ka link yahan bhej do:",
+        "🖼 **Custom Thumbnail Setup**\n\nApni Thumbnail image yahan bhej do:",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu")]])
     )
 
@@ -252,16 +191,6 @@ async def dub_studio_callback(client, callback_query):
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu")]])
     )
 
-@app.on_callback_query(filters.regex("set_banner_menu"))
-async def set_banner_menu(client, callback_query):
-    if not is_authorized(callback_query.from_user.id):
-        return
-    USER_SETTING_BANNER.add(callback_query.from_user.id)
-    await callback_query.message.edit_text(
-        "🖼 **Custom Thumbnail Setup**\n\nApni Thumbnail image bhej do:",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu")]])
-    )
-
 @app.on_callback_query(filters.regex("back_to_menu"))
 async def back_to_menu(client, callback_query):
     user_id = callback_query.from_user.id
@@ -279,22 +208,33 @@ async def back_to_menu(client, callback_query):
     
     await start_command(client, callback_query.message)
 
+# 🖼️ SEPARATE PHOTO HANDLER ONLY FOR THUMBNAIL
 @app.on_message(filters.photo & filters.private)
 async def receive_photo(client, message):
     user_id = message.from_user.id
     if not is_authorized(user_id):
         return
+
     if user_id in USER_SETTING_BANNER:
         USER_SETTING_BANNER.remove(user_id)
-        banner_path = f"banner_{user_id}.png"
+        banner_path = f"banner_{user_id}.jpg"
         downloaded_banner = await message.download(file_name=banner_path)
         USER_BANNERS[user_id] = downloaded_banner or banner_path
-        await message.reply_text("✅ **Thumbnail Saved Successfully!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]]))
+        
+        await message.reply_text(
+            "✅ **Thumbnail Saved Successfully!**\nAb compression ke baad video ka thumbnail cover yahi dikhega.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
+        )
 
+# 🎬 VIDEO HANDLER
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video_handler(client, message):
     user_id = message.from_user.id
     if not is_authorized(user_id):
+        return
+
+    # Agar user thumbnail set karne ke dauran photo ki jagah video bhej de, toh ignore karein ya handle karein
+    if user_id in USER_SETTING_BANNER:
         return
 
     if message.document:
@@ -356,73 +296,6 @@ async def receive_video_handler(client, message):
         reply_markup=quality_keyboard
     )
 
-@app.on_callback_query(filters.regex("process_dub_final"))
-async def process_dub_final_callback(client, callback_query):
-    user_id = callback_query.from_user.id
-    if user_id in PROCESSING_USERS:
-        await callback_query.answer("⏳ Processing pehle se chal rahi hai!", show_alert=True)
-        return
-
-    ud = get_user_dir(user_id)
-    main_ep = os.path.join(ud, "main_ep.mp4")
-    PROCESSING_USERS.add(user_id)
-    await callback_query.answer("🚀 Processing start ho gayi hai...")
-
-    try:
-        await callback_query.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        pass
-
-    clips = sorted([os.path.join(ud, f) for f in os.listdir(ud) if f.startswith("clip_")])
-    status_msg = await callback_query.message.edit_text(f"⚙️ **Processing Dub Mix:** Merging {len(clips)} clips...")
-    output_final = os.path.abspath(f"final_synced_episode_{user_id}.mp4")
-    
-    try:
-        if not clips and os.path.exists(main_ep):
-            shutil.copy(main_ep, output_final)
-        elif clips:
-            inputs = []
-            filter_complex = ""
-            valid_clips = 0
-            for clip in clips:
-                if os.path.exists(clip):
-                    inputs.extend(["-i", clip])
-                    filter_complex += f"[{valid_clips}:v][{valid_clips}:a]"
-                    valid_clips += 1
-            if valid_clips > 0:
-                filter_complex += f"concat=n={valid_clips}:v=1:a=1[outv][outa]"
-                command = [
-                    FFMPEG_PATH, *inputs, "-filter_complex", filter_complex,
-                    "-map", "[outv]", "-map", "[outa]",
-                    "-c:v", "libx264", "-crf", "22", "-preset", "medium",
-                    "-c:a", "copy", "-movflags", "+faststart",
-                    output_final, "-y"
-                ]
-                process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                await process.wait()
-            if not os.path.exists(output_final) or os.path.getsize(output_final) < 1024:
-                if os.path.exists(main_ep):
-                    shutil.copy(main_ep, output_final)
-        
-        banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
-        thumb_path = banner_file if os.path.exists(banner_file) else None
-
-        await status_msg.edit("📤 **Uploading Final Episode...**")
-        await client.send_video(
-            chat_id=callback_query.message.chat.id, video=output_final,
-            thumb=thumb_path, supports_streaming=True, caption="🎬 **Final Hindi Dubbed Anime Episode**"
-        )
-        await status_msg.delete()
-    except Exception as e:
-        await status_msg.edit(f"❌ Error: `{str(e)}`")
-    finally:
-        if os.path.exists(ud):
-            shutil.rmtree(ud)
-        if output_final and os.path.exists(output_final):
-            os.remove(output_final)
-        PROCESSING_USERS.discard(user_id)
-        WAITING_FOR_DUB_CLIPS.discard(user_id)
-
 async def compress_and_send(client, callback_query, mode):
     user_id = callback_query.from_user.id
     if not is_authorized(user_id):
@@ -439,7 +312,7 @@ async def compress_and_send(client, callback_query, mode):
     
     input_file = f"input_{user_id}.mp4"
     extracted_thumb = f"thumb_{user_id}.jpg"
-    banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
+    banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.jpg")
     
     try:
         downloaded_path = await msg.download(file_name=input_file)
@@ -455,7 +328,6 @@ async def compress_and_send(client, callback_query, mode):
                 pass
 
         qualities = []
-        # Panda Style precise CRF & Bitrate scaling for distinct quality gaps (360p ~ 50MB, 720p ~ 150MB, 1080p ~ 300MB)
         if mode == "comp_360p":
             qualities = [("360p", "scale=-2:360", "30")]
         elif mode == "comp_720p":
@@ -473,7 +345,6 @@ async def compress_and_send(client, callback_query, mode):
             await status_msg.edit(f"⚙️ **Panda Compressing to {q_label} (High Clarity, Untouched Audio)...**")
             output_file = f"output_{user_id}_{q_label}.mp4"
             
-            # -c:a copy leaves audio 100% original, CRF balances the size and high clarity
             command = [
                 FFMPEG_PATH, "-i", downloaded_path,
                 "-vf", scale_filter,
@@ -520,7 +391,7 @@ async def quality_callback_handler(client, callback_query):
     await compress_and_send(client, callback_query, callback_query.data)
 
 class SimpleHandler(BaseHTTPRequestHandler):
-    def do_GET(self,):
+    def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
