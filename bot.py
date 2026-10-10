@@ -62,6 +62,7 @@ USER_BANNERS = {}
 WAITING_FOR_DOWNLOAD_LINK = set()
 WAITING_FOR_MAIN_EPISODE = set()
 WAITING_FOR_DUB_CLIPS = set()
+PROCESSING_USERS = set()
 
 def get_user_dir(user_id):
     d = os.path.abspath(f"user_data_{user_id}")
@@ -141,7 +142,7 @@ async def request_access_handler(client, callback_query):
     username = callback_query.from_user.username or callback_query.from_user.first_name
     
     await callback_query.answer("✅ Request main owner ke paas bhej di gayi hai!", show_alert=True)
-    await callback_query.message.edit_text("⏳ **Request Sent!** Owner ki approval ka intezaار karein.")
+    await callback_query.message.edit_text("⏳ **Request Sent!** Owner ki approval ka intezaar karein.")
     
     try:
         await client.send_message(
@@ -280,6 +281,7 @@ async def dub_studio_callback(client, callback_query):
         
     WAITING_FOR_MAIN_EPISODE.add(user_id)
     WAITING_FOR_DUB_CLIPS.discard(user_id)
+    PROCESSING_USERS.discard(user_id)
     
     ud = get_user_dir(user_id)
     if os.path.exists(ud):
@@ -323,6 +325,7 @@ async def back_to_menu(client, callback_query):
     WAITING_FOR_DOWNLOAD_LINK.discard(user_id)
     WAITING_FOR_MAIN_EPISODE.discard(user_id)
     WAITING_FOR_DUB_CLIPS.discard(user_id)
+    PROCESSING_USERS.discard(user_id)
     
     ud = get_user_dir(user_id)
     if os.path.exists(ud):
@@ -487,7 +490,7 @@ async def receive_photo(client, message):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
         )
 
-# 🎬 DUB STUDIO & VIDEO COMPRESSION HANDLER (FIXED DOCUMENT / VIDEO ACCEPTANCE)
+# 🎬 DUB STUDIO & VIDEO COMPRESSION HANDLER
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video_handler(client, message):
     user_id = message.from_user.id
@@ -495,7 +498,6 @@ async def receive_video_handler(client, message):
         await message.reply_text("❌ Aapke paas is bot ko use karne ki permission nahi hai!")
         return
 
-    # Check if document is actually a video file by checking extension
     if message.document:
         fname = (message.document.file_name or "").lower()
         if not fname.endswith(('.mp4', '.mkv', '.mov', '.webm', '.avi', '.m4v')):
@@ -539,7 +541,7 @@ async def receive_video_handler(client, message):
             await status_msg.edit(f"❌ Error: `{str(e)}`")
         return
 
-    # Step 2: Receiving Dubbed Clips (Auto-accepts even if sent as documents/albums)
+    # Step 2: Receiving Dubbed Clips safely
     if user_id in WAITING_FOR_DUB_CLIPS or os.path.exists(muted_episode_path):
         if user_id not in WAITING_FOR_DUB_CLIPS:
             WAITING_FOR_DUB_CLIPS.add(user_id)
@@ -584,17 +586,25 @@ async def receive_video_handler(client, message):
         reply_markup=quality_keyboard
     )
 
-# ⚙️ PROCESS & MERGE DUBBED MIX FINAL CALLBACK
+# ⚙️ PROCESS & MERGE DUBBED MIX FINAL CALLBACK (WITH PROCESSING LOCK)
 @app.on_callback_query(filters.regex("process_dub_final"))
 async def process_dub_final_callback(client, callback_query):
     user_id = callback_query.from_user.id
+
+    if user_id in PROCESSING_USERS:
+        await callback_query.answer("⏳ Processing pehle se chal rahi hai, kripya intezaار karein!", show_alert=True)
+        return
+
     ud = get_user_dir(user_id)
     episode_path = os.path.join(ud, "muted_episode.mp4")
     
     if not os.path.exists(episode_path):
         await callback_query.answer("❌ Pehle Main Episode bhejo!", show_alert=True)
         return
-        
+
+    PROCESSING_USERS.add(user_id)
+    await callback_query.answer("🚀 Processing start ho gayi hai...")
+
     clips = sorted([os.path.join(ud, f) for f in os.listdir(ud) if f.startswith("clip_")])
 
     status_msg = await callback_query.message.edit_text(f"⚙️ **Processing Dub Mix:** {len(clips)} clips received. Removing noise & merging audio...")
@@ -653,6 +663,7 @@ async def process_dub_final_callback(client, callback_query):
         if output_final and os.path.exists(output_final):
             os.remove(output_final)
             
+        PROCESSING_USERS.discard(user_id)
         WAITING_FOR_DUB_CLIPS.discard(user_id)
 
 # ⚙️ HIGH QUALITY COMPRESSION & OVERLAY THUMBNAIL
