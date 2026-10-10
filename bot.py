@@ -264,9 +264,9 @@ async def compress_menu(client, callback_query):
     log_activity(user_id, callback_query.from_user.username, "OPEN_MENU", "Opened Video Compressor Studio")
     
     await callback_query.message.edit_text(
-        "🗜 **Video Size Reducer (Original Resolution & Thumbnail Intact)**\n"
+        "🗜 **Video Compressor Studio (High Quality with Thumbnail)**\n"
         "👑 **Developer:** @kage_x_edit\n\n"
-        "Bhai, apni video yahan bhej do. Video ka resolution & clarity same rahegi, bas file Size (MB) kam ho jayega aur custom thumbnail par embed ho jayega!",
+        "Bhai, apni video yahan bhej do. Bot high quality ke sath compress karega!",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅ Back to Menu", callback_data="back_to_menu")]
         ])
@@ -311,7 +311,7 @@ async def set_banner_menu(client, callback_query):
     status_text = "🟢 **Custom thumbnail saved hai!**" if has_banner else "🔴 **Koi thumbnail saved nahi hai.**"
     
     await callback_query.message.edit_text(
-        f"🖼 **Custom Thumbnail Setup**\n\n{status_text}\n\nApni Thumbnail image yahan bhej do (Yeh video ke cover aur thumbnail par apply ho jayegi):",
+        f"🖼 **Custom Thumbnail Setup**\n\n{status_text}\n\nApni Thumbnail image yahan bhej do:",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]])
     )
 
@@ -338,7 +338,7 @@ async def back_to_menu(client, callback_query):
         ],
         [
             InlineKeyboardButton("🎬 Dub Sync & Mix Studio", callback_data="dub_studio"),
-            InlineKeyboardButton("🖼️ Set Custom Thumbnail", callback_data="set_banner_menu")
+            InlineKeyboardButton("🖼️ Custom Thumbnail", callback_data="set_banner_menu")
         ]
     ]
 
@@ -355,7 +355,6 @@ async def back_to_menu(client, callback_query):
         reply_markup=menu_keyboard
     )
 
-# 📥 UNIVERSAL DOWNLOADER & LINK HANDLER
 @app.on_message(filters.regex(r"https?://") & filters.private)
 async def universal_link_handler(client, message):
     user_id = message.from_user.id
@@ -486,11 +485,10 @@ async def receive_photo(client, message):
         
         log_activity(user_id, message.from_user.username, "SET_THUMBNAIL", "Saved Custom Thumbnail")
         await message.reply_text(
-            "✅ **Thumbnail Saved Successfully!**\nAb compression ke baad video ka thumbnail cover yahi dikhega.",
+            "✅ **Thumbnail Saved Successfully!**",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
         )
 
-# 🎬 DUB STUDIO & VIDEO COMPRESSION HANDLER
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video_handler(client, message):
     user_id = message.from_user.id
@@ -505,7 +503,6 @@ async def receive_video_handler(client, message):
 
     ud = get_user_dir(user_id)
 
-    # Step 1: Receiving Main Episode in Dub Studio
     if user_id in WAITING_FOR_MAIN_EPISODE:
         WAITING_FOR_MAIN_EPISODE.remove(user_id)
         status_msg = await message.reply_text("📥 **Downloading Main Episode...**")
@@ -517,8 +514,7 @@ async def receive_video_handler(client, message):
             WAITING_FOR_DUB_CLIPS.add(user_id)
             
             await status_msg.edit(
-                "✅ **Main Episode Saved!**\n\n"
-                "Ab apni **saari Hindi Dubbed Clips (Video + Voice)** yahan bhej do aur bhejne ke baad niche button dabao:",
+                "✅ **Main Episode Saved!**\n\nAb apni saari Hindi Dubbed Clips bhejiye:",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🚀 Mix & Process Dubbed Episode", callback_data="process_dub_final")],
                     [InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")]
@@ -528,7 +524,6 @@ async def receive_video_handler(client, message):
             await status_msg.edit(f"❌ Error: `{str(e)}`")
         return
 
-    # Step 2: Receiving Dubbed Clips safely
     if user_id in WAITING_FOR_DUB_CLIPS or os.path.exists(os.path.join(ud, "main_ep.mp4")):
         if user_id not in WAITING_FOR_DUB_CLIPS:
             WAITING_FOR_DUB_CLIPS.add(user_id)
@@ -540,8 +535,7 @@ async def receive_video_handler(client, message):
         clips_count = len([f for f in os.listdir(ud) if f.startswith("clip_")])
         
         await message.reply_text(
-            f"✅ **Dubbed Clip #{clips_count} Added Successfully!**\n"
-            f"Agar aur clips hain toh bhejte jao, warna niche mix button par click karo:",
+            f"✅ **Dubbed Clip #{clips_count} Added Successfully!**",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton(f"🚀 Mix & Process Dubbed Episode ({clips_count} Clips)", callback_data="process_dub_final")],
                 [InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")]
@@ -549,7 +543,6 @@ async def receive_video_handler(client, message):
         )
         return
 
-    # Standard Video Compression Flow (Original Quality & Thumbnail Intact)
     USER_VIDEOS[user_id] = message
     file_name = message.video.file_name if message.video and message.video.file_name else (message.document.file_name if message.document else "video.mp4")
     
@@ -557,26 +550,26 @@ async def receive_video_handler(client, message):
 
     quality_keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📉 Compress MB (High Clarity)", callback_data="comp_mod"),
-            InlineKeyboardButton("🗜️ Compress MB (Ultra Small Size)", callback_data="comp_high")
+            InlineKeyboardButton("📉 360p (High Clarity)", callback_data="comp_360p"),
+            InlineKeyboardButton("📊 720p (High Clarity)", callback_data="comp_720p")
+        ],
+        [
+            InlineKeyboardButton("📈 1080p (HD High Clarity)", callback_data="comp_1080p"),
+            InlineKeyboardButton("🔥 All in 3 Qualities (360+720+1080)", callback_data="comp_all")
         ]
     ])
 
     await message.reply_text(
-        f"🎬 **Video Received for MB Compression!**\n"
-        f"📁 File: `{file_name}`\n\n"
-        f"*(Note: Video Quality & Resolution bilkul same rahegi, bas file MB reduce honge)*\n"
-        f"Select mode:",
+        f"🎬 **Video Received for Compression!**\n📁 File: `{file_name}`\n\nSelect compression quality:",
         reply_markup=quality_keyboard
     )
 
-# ⚙️ PROCESS & MERGE DUBBED MIX FINAL CALLBACK
 @app.on_callback_query(filters.regex("process_dub_final"))
 async def process_dub_final_callback(client, callback_query):
     user_id = callback_query.from_user.id
 
     if user_id in PROCESSING_USERS:
-        await callback_query.answer("⏳ Processing pehle se chal rahi hai, kripya intezaar karein!", show_alert=True)
+        await callback_query.answer("⏳ Processing pehle se chal rahi hai!", show_alert=True)
         return
 
     ud = get_user_dir(user_id)
@@ -592,7 +585,7 @@ async def process_dub_final_callback(client, callback_query):
 
     clips = sorted([os.path.join(ud, f) for f in os.listdir(ud) if f.startswith("clip_")])
 
-    status_msg = await callback_query.message.edit_text(f"⚙️ **Processing Dub Mix:** Merging {len(clips)} Hindi lipsync dubbed clips with Voice...")
+    status_msg = await callback_query.message.edit_text(f"⚙️ **Processing Dub Mix:** Merging {len(clips)} clips...")
     output_final = os.path.abspath(f"final_synced_episode_{user_id}.mp4")
     
     try:
@@ -616,7 +609,7 @@ async def process_dub_final_callback(client, callback_query):
                     FFMPEG_PATH, *inputs,
                     "-filter_complex", filter_complex,
                     "-map", "[outv]", "-map", "[outa]",
-                    "-c:v", "libx264", "-crf", "22", "-preset", "fast",
+                    "-c:v", "libx264", "-crf", "20", "-preset", "medium",
                     "-c:a", "aac", "-b:a", "192k",
                     "-movflags", "+faststart",
                     output_final, "-y"
@@ -632,18 +625,18 @@ async def process_dub_final_callback(client, callback_query):
         banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
         thumb_path = banner_file if os.path.exists(banner_file) else None
 
-        await status_msg.edit("📤 **Uploading Final Synced Hindi Dubbed Episode...**")
+        await status_msg.edit("📤 **Uploading Final Episode...**")
         await client.send_video(
             chat_id=callback_query.message.chat.id,
             video=output_final,
             thumb=thumb_path,
             supports_streaming=True,
-            caption="🎬 **Final Hindi Dubbed Anime Episode (Lipsync Video + Voice 100% Working)**"
+            caption="🎬 **Final Hindi Dubbed Anime Episode**"
         )
         await status_msg.delete()
         
     except Exception as e:
-        await status_msg.edit(f"❌ Dub Mix Processing Error: `{str(e)}`")
+        await status_msg.edit(f"❌ Error: `{str(e)}`")
     finally:
         if os.path.exists(ud):
             shutil.rmtree(ud)
@@ -653,7 +646,6 @@ async def process_dub_final_callback(client, callback_query):
         PROCESSING_USERS.discard(user_id)
         WAITING_FOR_DUB_CLIPS.discard(user_id)
 
-# ⚙️ HIGH QUALITY COMPRESSION (KEEP ORIGINAL RESOLUTION + AUTO THUMBNAIL EMBED)
 async def compress_and_send(client, callback_query, mode):
     user_id = callback_query.from_user.id
     username = callback_query.from_user.username or callback_query.from_user.first_name
@@ -663,7 +655,7 @@ async def compress_and_send(client, callback_query, mode):
         return
 
     if user_id not in USER_VIDEOS:
-        await callback_query.answer("⚠ Session expired! Dubara video bhejo.", show_alert=True)
+        await callback_query.answer("⚠ Session expired!", show_alert=True)
         return
 
     msg = USER_VIDEOS[user_id]
@@ -675,24 +667,20 @@ async def compress_and_send(client, callback_query, mode):
 
     log_activity(user_id, username, "COMPRESS", f"File: {original_name} | Mode: {mode}")
 
-    status_msg = await callback_query.message.edit_text("📥 **Downloading video for MB reduction...**")
+    status_msg = await callback_query.message.edit_text("📥 **Downloading video...**")
     
     input_file = f"input_{user_id}.mp4"
-    output_file = f"compressed_{user_id}.mp4"
     extracted_thumb = f"thumb_{user_id}.jpg"
-    
     banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
     
     try:
         downloaded_path = await msg.download(file_name=input_file)
         
-        # 1. Automatic Thumbnail Extraction (agar custom thumbnail set na ho)
         thumb_to_use = None
         if os.path.exists(banner_file):
             thumb_to_use = banner_file
         else:
             try:
-                # Extract 1st frame from video automatically
                 cmd_thumb = [
                     FFMPEG_PATH, "-ss", "00:00:01", "-i", downloaded_path,
                     "-vframes", "1", "-q:v", "2", extracted_thumb, "-y"
@@ -704,40 +692,60 @@ async def compress_and_send(client, callback_query, mode):
             except Exception:
                 pass
 
-        crf_val = "23" if mode == "comp_mod" else "26"
-        await status_msg.edit("⚙️ **Reducing file size (Original Video Quality & Resolution Intact)...**")
-        
-        # Original Resolution Preserved (-vf option omitted, bitrate controlled losslessly)
-        command = [
-            FFMPEG_PATH, "-i", downloaded_path,
-            "-c:v", "libx264", "-crf", crf_val, "-preset", "medium",
-            "-c:a", "aac", "-b:a", "128k",
-            "-movflags", "+faststart",
-            output_file, "-y"
-        ]
+        qualities_to_process = []
+        if mode == "comp_360p":
+            qualities_to_process = [("360p", "scale=-2:360", "20")]
+        elif mode == "comp_720p":
+            qualities_to_process = [("720p", "scale=-2:720", "20")]
+        elif mode == "comp_1080p":
+            qualities_to_process = [("1080p", "scale=-2:1080", "20")]
+        elif mode == "comp_all":
+            qualities_to_process = [
+                ("360p", "scale=-2:360", "20"),
+                ("720p", "scale=-2:720", "20"),
+                ("1080p", "scale=-2:1080", "20")
+            ]
+
+        for q_label, scale_filter, crf_val in qualities_to_process:
+            await status_msg.edit(f"⚙️ **Compressing to {q_label} (High Clarity)...**")
+            output_file = f"output_{user_id}_{q_label}.mp4"
             
-        process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        await process.wait()
-        
-        final_output = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
-        
-        base_name, ext = os.path.splitext(original_name)
-        new_filename = f"{base_name}_compressed{ext}"
-        final_path = os.path.join(os.path.dirname(final_output), new_filename)
-        
-        if os.path.exists(final_path):
-            os.remove(final_path)
-        os.rename(final_output, final_path)
-        
-        await status_msg.edit("📤 **Uploading compressed video with thumbnail...**")
-        
-        await client.send_video(
-            chat_id=callback_query.message.chat.id,
-            video=final_path,
-            thumb=thumb_to_use,
-            supports_streaming=True,
-            caption=f"📁 `{new_filename}` (Original Resolution & High Clarity)"
-        )
+            command = [
+                FFMPEG_PATH, "-i", downloaded_path,
+                "-vf", scale_filter,
+                "-c:v", "libx264", "-crf", crf_val, "-preset", "medium",
+                "-c:a", "aac", "-b:a", "128k",
+                "-movflags", "+faststart",
+                output_file, "-y"
+            ]
+                
+            process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            await process.wait()
+            
+            final_output = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
+            
+            base_name, ext = os.path.splitext(original_name)
+            new_filename = f"{base_name}_{q_label}{ext}"
+            final_path = os.path.join(os.path.dirname(final_output), new_filename)
+            
+            if os.path.exists(final_path):
+                os.remove(final_path)
+            os.rename(final_output, final_path)
+            
+            await status_msg.edit(f"📤 **Sending {q_label} video...**")
+            
+            await client.send_video(
+                chat_id=callback_query.message.chat.id,
+                video=final_path,
+                thumb=thumb_to_use,
+                supports_streaming=True,
+                caption=f"📁 `{new_filename}` ({q_label} High Clarity)"
+            )
+            
+            await asyncio.sleep(1)
+            
+            if os.path.exists(final_path):
+                os.remove(final_path)
 
         await status_msg.delete()
         
@@ -748,8 +756,6 @@ async def compress_and_send(client, callback_query, mode):
     finally:
         if os.path.exists(input_file):
             os.remove(input_file)
-        if os.path.exists(output_file):
-            os.remove(output_file)
         if os.path.exists(extracted_thumb):
             os.remove(extracted_thumb)
         if user_id in USER_VIDEOS:
@@ -759,7 +765,6 @@ async def compress_and_send(client, callback_query, mode):
 async def quality_callback_handler(client, callback_query):
     await compress_and_send(client, callback_query, callback_query.data)
 
-# HTTP Server for Railway
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
