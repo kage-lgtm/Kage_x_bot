@@ -3,7 +3,6 @@ import logging
 import asyncio
 import re
 import time
-import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 from pyrogram import Client, filters
@@ -63,28 +62,8 @@ WAITING_FOR_DOWNLOAD_LINK = set()
 WAITING_FOR_MAIN_EPISODE = set()
 WAITING_FOR_DUB_CLIPS = set()
 
-# JSON Session Helper Functions (Prevents File Expiry/Session Loss)
-def get_session_file(user_id):
-    return f"session_{user_id}.json"
-
-def save_user_session(user_id, data):
-    with open(get_session_file(user_id), "w") as f:
-        json.dump(data, f)
-
-def load_user_session(user_id):
-    sfile = get_session_file(user_id)
-    if os.path.exists(sfile):
-        try:
-            with open(sfile, "r") as f:
-                return json.load(f)
-        except Exception:
-            return {"episode": None, "clips": []}
-    return {"episode": None, "clips": []}
-
-def clear_user_session(user_id):
-    sfile = get_session_file(user_id)
-    if os.path.exists(sfile):
-        os.remove(sfile)
+# Global Robust RAM Session Memory
+DUB_SESSIONS_MEMORY = {}
 
 def is_authorized(user_id):
     if user_id == MAIN_OWNER:
@@ -297,7 +276,10 @@ async def dub_studio_callback(client, callback_query):
         return
         
     WAITING_FOR_MAIN_EPISODE.add(user_id)
-    clear_user_session(user_id)
+    WAITING_FOR_DUB_CLIPS.discard(user_id)
+    if user_id in DUB_SESSIONS_MEMORY:
+        del DUB_SESSIONS_MEMORY[user_id]
+        
     log_activity(user_id, callback_query.from_user.username, "OPEN_MENU", "Opened Dub Sync & Mix Studio")
     
     await callback_query.message.edit_text(
@@ -336,7 +318,8 @@ async def back_to_menu(client, callback_query):
     WAITING_FOR_DOWNLOAD_LINK.discard(user_id)
     WAITING_FOR_MAIN_EPISODE.discard(user_id)
     WAITING_FOR_DUB_CLIPS.discard(user_id)
-    clear_user_session(user_id)
+    if user_id in DUB_SESSIONS_MEMORY:
+        del DUB_SESSIONS_MEMORY[user_id]
     
     menu_buttons = [
         [
@@ -530,12 +513,12 @@ async def receive_video_handler(client, message):
             if os.path.exists(input_path):
                 os.remove(input_path)
                 
-            save_user_session(user_id, {"episode": muted_path, "clips": []})
+            DUB_SESSIONS_MEMORY[user_id] = {"episode": muted_path, "clips": []}
             WAITING_FOR_DUB_CLIPS.add(user_id)
             
             await status_msg.edit(
-                "✅ **Main Episode Muted & Saved Permanently!**\n\n"
-                "Ab apni **saari Dubbed Clips ek sath (ya ek-ek karke)** yahan bhej do. Bhejne ke baad niche button click karo:",
+                "✅ **Main Episode Muted Successfully!**\n\n"
+                "Ab apni **saari Dubbed Clips ek sath** yahan bhej do aur bhejne ke baad niche button dabao:",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🚀 Mix & Process Dubbed Episode", callback_data="process_dub_final")],
                     [InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")]
@@ -545,18 +528,22 @@ async def receive_video_handler(client, message):
             await status_msg.edit(f"❌ Error: `{str(e)}`")
         return
 
-    # Step 2: Receiving Dubbed Clips safely via JSON persistence
-    session = load_user_session(user_id)
-    if user_id in WAITING_FOR_DUB_CLIPS or session.get("episode"):
-        clip_path = os.path.abspath(f"clip_{user_id}_{int(time.time())}_{len(session.get('clips', []))}.mp4")
+    # Step 2: Receiving Dubbed Clips safely into RAM Memory
+    if user_id in WAITING_FOR_DUB_CLIPS or user_id in DUB_SESSIONS_MEMORY:
+        if user_id not in DUB_SESSIONS_MEMORY:
+            # Fallback if state got out of sync
+            await message.reply_text("❌ Session reset ho gaya hai! Kripya Dub Studio dubara open karein.")
+            return
+            
+        clip_path = os.path.abspath(f"clip_{user_id}_{int(time.time())}_{len(DUB_SESSIONS_MEMORY[user_id]['clips'])}.mp4")
         await message.download(file_name=clip_path)
         
-        clips_list = session.get("clips", [])
-        clips_list.append(clip_path)
-        session["clips"] = clips_list
-        save_user_session(user_id, session)
+        DUB_SESSIONS_MEMORY[user_id]["clips"].append(clip_path)
+        count = len(DUB_SESSIONS_MEMORY[user_id]["clips"])
         
-        count = len(clips_list)
+        if user_id not in WAITING_FOR_DUB_CLIPS:
+            WAITING_FOR_DUB_CLIPS.add(user_id)
+        
         await message.reply_text(
             f"✅ **Dubbed Clip #{count} Added Successfully!**\n"
             f"Agar aur clips hain toh bhejte jao, warna niche mix button par click karo:",
@@ -595,12 +582,16 @@ async def receive_video_handler(client, message):
 @app.on_callback_query(filters.regex("process_dub_final"))
 async def process_dub_final_callback(client, callback_query):
     user_id = callback_query.from_user.id
-    session = load_user_session(user_id)
-    episode_path = session.get("episode")
-    clips = session.get("clips", [])
+    if user_id not in DUB_SESSIONS_MEMORY or not DUB_SESSIONS_MEMORY[user_id].get("episode"):
+        await callback_query.answer("❌ Pehle Main Episode bhejo!", show_alert=True)
+        return
+        
+    session = DUB_SESSIONS_MEMORY[user_id]
+    episode_path = session["episode"]
+    clips = session["clips"]
     
     if not episode_path or not os.path.exists(episode_path):
-        await callback_query.answer("❌ Episode file expire nahi mili! Pehle Main Episode bhej kar try karein.", show_alert=True)
+        await callback_query.answer("❌ Episode file nahi mili! Pehle Main Episode bhej kar try karein.", show_alert=True)
         return
 
     status_msg = await callback_query.message.edit_text(f"⚙️ **Processing Dub Mix:** {len(clips)} clips received. Removing noise & merging audio...")
@@ -662,7 +653,8 @@ async def process_dub_final_callback(client, callback_query):
         if output_final and os.path.exists(output_final) and output_final != episode_path:
             os.remove(output_final)
             
-        clear_user_session(user_id)
+        if user_id in DUB_SESSIONS_MEMORY:
+            del DUB_SESSIONS_MEMORY[user_id]
         WAITING_FOR_DUB_CLIPS.discard(user_id)
 
 # ⚙️ HIGH QUALITY COMPRESSION & OVERLAY THUMBNAIL
