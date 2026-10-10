@@ -3,6 +3,7 @@ import logging
 import asyncio
 import re
 import time
+import shutil
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 from pyrogram import Client, filters
@@ -62,7 +63,10 @@ WAITING_FOR_DOWNLOAD_LINK = set()
 WAITING_FOR_MAIN_EPISODE = set()
 WAITING_FOR_DUB_CLIPS = set()
 
-DUB_SESSIONS_MEMORY = {}
+def get_user_dir(user_id):
+    d = os.path.abspath(f"user_data_{user_id}")
+    os.makedirs(d, exist_ok=True)
+    return d
 
 def is_authorized(user_id):
     if user_id == MAIN_OWNER:
@@ -137,7 +141,7 @@ async def request_access_handler(client, callback_query):
     username = callback_query.from_user.username or callback_query.from_user.first_name
     
     await callback_query.answer("✅ Request main owner ke paas bhej di gayi hai!", show_alert=True)
-    await callback_query.message.edit_text("⏳ **Request Sent!** Owner ki approval ka intezaar karein.")
+    await callback_query.message.edit_text("⏳ **Request Sent!** Owner ki approval ka intezaار karein.")
     
     try:
         await client.send_message(
@@ -276,8 +280,10 @@ async def dub_studio_callback(client, callback_query):
         
     WAITING_FOR_MAIN_EPISODE.add(user_id)
     WAITING_FOR_DUB_CLIPS.discard(user_id)
-    if user_id in DUB_SESSIONS_MEMORY:
-        del DUB_SESSIONS_MEMORY[user_id]
+    
+    ud = get_user_dir(user_id)
+    if os.path.exists(ud):
+        shutil.rmtree(ud)
         
     log_activity(user_id, callback_query.from_user.username, "OPEN_MENU", "Opened Dub Sync & Mix Studio")
     
@@ -317,8 +323,10 @@ async def back_to_menu(client, callback_query):
     WAITING_FOR_DOWNLOAD_LINK.discard(user_id)
     WAITING_FOR_MAIN_EPISODE.discard(user_id)
     WAITING_FOR_DUB_CLIPS.discard(user_id)
-    if user_id in DUB_SESSIONS_MEMORY:
-        del DUB_SESSIONS_MEMORY[user_id]
+    
+    ud = get_user_dir(user_id)
+    if os.path.exists(ud):
+        shutil.rmtree(ud)
     
     menu_buttons = [
         [
@@ -479,7 +487,7 @@ async def receive_photo(client, message):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
         )
 
-# 🎬 DUB STUDIO & VIDEO COMPRESSION HANDLER
+# 🎬 DUB STUDIO & VIDEO COMPRESSION HANDLER (FIXED DOCUMENT / VIDEO ACCEPTANCE)
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video_handler(client, message):
     user_id = message.from_user.id
@@ -487,17 +495,21 @@ async def receive_video_handler(client, message):
         await message.reply_text("❌ Aapke paas is bot ko use karne ki permission nahi hai!")
         return
 
-    if message.document and not message.document.mime_type.startswith("video"):
-        return
+    # Check if document is actually a video file by checking extension
+    if message.document:
+        fname = (message.document.file_name or "").lower()
+        if not fname.endswith(('.mp4', '.mkv', '.mov', '.webm', '.avi', '.m4v')):
+            return
 
-    muted_path = os.path.abspath(f"muted_ep_{user_id}.mp4")
+    ud = get_user_dir(user_id)
+    muted_episode_path = os.path.join(ud, "muted_episode.mp4")
 
     # Step 1: Receiving Main Episode in Dub Studio
     if user_id in WAITING_FOR_MAIN_EPISODE:
         WAITING_FOR_MAIN_EPISODE.remove(user_id)
         status_msg = await message.reply_text("📥 **Downloading Main Episode & muting original audio...**")
         
-        input_path = f"main_ep_{user_id}.mp4"
+        input_path = os.path.join(ud, f"main_ep_{user_id}.mp4")
         
         try:
             await message.download(file_name=input_path)
@@ -505,7 +517,7 @@ async def receive_video_handler(client, message):
             command = [
                 FFMPEG_PATH, "-i", input_path,
                 "-an", "-c:v", "copy",
-                muted_path, "-y"
+                muted_episode_path, "-y"
             ]
             process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             await process.wait()
@@ -513,11 +525,10 @@ async def receive_video_handler(client, message):
             if os.path.exists(input_path):
                 os.remove(input_path)
                 
-            DUB_SESSIONS_MEMORY[user_id] = {"episode": muted_path, "clips": []}
             WAITING_FOR_DUB_CLIPS.add(user_id)
             
             await status_msg.edit(
-                "✅ **Main Episode Muted Successfully!**\n\n"
+                "✅ **Main Episode Muted & Saved Securely!**\n\n"
                 "Ab apni **saari Dubbed Clips ek sath** yahan bhej do aur bhejne ke baad niche button dabao:",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🚀 Mix & Process Dubbed Episode", callback_data="process_dub_final")],
@@ -528,25 +539,22 @@ async def receive_video_handler(client, message):
             await status_msg.edit(f"❌ Error: `{str(e)}`")
         return
 
-    # Step 2: Receiving Dubbed Clips safely (Auto-fallback to disk file if session memory resets)
-    if user_id in WAITING_FOR_DUB_CLIPS or os.path.exists(muted_path):
-        if user_id not in DUB_SESSIONS_MEMORY:
-            DUB_SESSIONS_MEMORY[user_id] = {"episode": muted_path, "clips": []}
-            
-        clip_path = os.path.abspath(f"clip_{user_id}_{int(time.time())}_{len(DUB_SESSIONS_MEMORY[user_id]['clips'])}.mp4")
-        await message.download(file_name=clip_path)
-        
-        DUB_SESSIONS_MEMORY[user_id]["clips"].append(clip_path)
-        count = len(DUB_SESSIONS_MEMORY[user_id]["clips"])
-        
+    # Step 2: Receiving Dubbed Clips (Auto-accepts even if sent as documents/albums)
+    if user_id in WAITING_FOR_DUB_CLIPS or os.path.exists(muted_episode_path):
         if user_id not in WAITING_FOR_DUB_CLIPS:
             WAITING_FOR_DUB_CLIPS.add(user_id)
+
+        clip_name = f"clip_{int(time.time() * 1000)}_{len(os.listdir(ud))}.mp4"
+        clip_path = os.path.join(ud, clip_name)
+        await message.download(file_name=clip_path)
+        
+        clips_count = len([f for f in os.listdir(ud) if f.startswith("clip_")])
         
         await message.reply_text(
-            f"✅ **Dubbed Clip #{count} Added Successfully!**\n"
+            f"✅ **Dubbed Clip #{clips_count} Added Successfully!**\n"
             f"Agar aur clips hain toh bhejte jao, warna niche mix button par click karo:",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"🚀 Mix & Process Dubbed Episode ({count} Clips)", callback_data="process_dub_final")],
+                [InlineKeyboardButton(f"🚀 Mix & Process Dubbed Episode ({clips_count} Clips)", callback_data="process_dub_final")],
                 [InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")]
             ])
         )
@@ -580,32 +588,21 @@ async def receive_video_handler(client, message):
 @app.on_callback_query(filters.regex("process_dub_final"))
 async def process_dub_final_callback(client, callback_query):
     user_id = callback_query.from_user.id
-    muted_path = os.path.abspath(f"muted_ep_{user_id}.mp4")
+    ud = get_user_dir(user_id)
+    episode_path = os.path.join(ud, "muted_episode.mp4")
     
-    # Absolute foolproof check: Get from memory or directly look on disk
-    episode_path = None
-    if user_id in DUB_SESSIONS_MEMORY and DUB_SESSIONS_MEMORY[user_id].get("episode"):
-        episode_path = DUB_SESSIONS_MEMORY[user_id]["episode"]
-    elif os.path.exists(muted_path):
-        episode_path = muted_path
-        
-    if not episode_path or not os.path.exists(episode_path):
+    if not os.path.exists(episode_path):
         await callback_query.answer("❌ Pehle Main Episode bhejo!", show_alert=True)
         return
         
-    clips = []
-    if user_id in DUB_SESSIONS_MEMORY:
-        clips = DUB_SESSIONS_MEMORY[user_id].get("clips", [])
-    else:
-        # Fallback to scan all saved clip files on disk for this user if memory got cleared
-        clips = [os.path.abspath(f) for f in os.listdir(".") if f.startswith(f"clip_{user_id}_")]
+    clips = sorted([os.path.join(ud, f) for f in os.listdir(ud) if f.startswith("clip_")])
 
     status_msg = await callback_query.message.edit_text(f"⚙️ **Processing Dub Mix:** {len(clips)} clips received. Removing noise & merging audio...")
     output_final = os.path.abspath(f"final_synced_episode_{user_id}.mp4")
     
     try:
         if not clips:
-            os.rename(episode_path, output_final)
+            shutil.copy(episode_path, output_final)
         else:
             inputs = ["-i", episode_path]
             filter_inputs = ""
@@ -633,7 +630,7 @@ async def process_dub_final_callback(client, callback_query):
                 await process.wait()
             
             if not os.path.exists(output_final) or os.path.getsize(output_final) < 1024:
-                output_final = episode_path
+                shutil.copy(episode_path, output_final)
         
         banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
         thumb_path = banner_file if os.path.exists(banner_file) else None
@@ -651,16 +648,11 @@ async def process_dub_final_callback(client, callback_query):
     except Exception as e:
         await status_msg.edit(f"❌ Dub Mix Processing Error: `{str(e)}`")
     finally:
-        if episode_path and os.path.exists(episode_path):
-            os.remove(episode_path)
-        for c in clips:
-            if c and os.path.exists(c):
-                os.remove(c)
-        if output_final and os.path.exists(output_final) and output_final != episode_path:
+        if os.path.exists(ud):
+            shutil.rmtree(ud)
+        if output_final and os.path.exists(output_final):
             os.remove(output_final)
             
-        if user_id in DUB_SESSIONS_MEMORY:
-            del DUB_SESSIONS_MEMORY[user_id]
         WAITING_FOR_DUB_CLIPS.discard(user_id)
 
 # ⚙️ HIGH QUALITY COMPRESSION & OVERLAY THUMBNAIL
