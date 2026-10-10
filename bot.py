@@ -292,7 +292,7 @@ async def dub_studio_callback(client, callback_query):
     await callback_query.message.edit_text(
         "🎬 **Dub Sync & Mix Studio**\n"
         "👑 **Developer:** @kage_x_edit\n\n"
-        "Bhai, sabse pehle apna **Main Episode Video** alag se bhej do taaki bot uska audio mute karke ready kar sake:",
+        "Bhai, sabse pehle apna **Main Episode Video** alag se bhej do:",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_menu")]
         ])
@@ -509,29 +509,17 @@ async def receive_video_handler(client, message):
     # Step 1: Receiving Main Episode in Dub Studio
     if user_id in WAITING_FOR_MAIN_EPISODE:
         WAITING_FOR_MAIN_EPISODE.remove(user_id)
-        status_msg = await message.reply_text("📥 **Downloading Main Episode & muting original audio...**")
+        status_msg = await message.reply_text("📥 **Downloading Main Episode...**")
         
-        input_path = os.path.join(ud, f"main_ep_{user_id}.mp4")
+        input_path = os.path.join(ud, "main_ep.mp4")
         
         try:
             await message.download(file_name=input_path)
-            
-            command = [
-                FFMPEG_PATH, "-i", input_path,
-                "-an", "-c:v", "copy",
-                muted_episode_path, "-y"
-            ]
-            process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-            await process.wait()
-            
-            if os.path.exists(input_path):
-                os.remove(input_path)
-                
             WAITING_FOR_DUB_CLIPS.add(user_id)
             
             await status_msg.edit(
-                "✅ **Main Episode Saved & Prepared!**\n\n"
-                "Ab apni **saari Dubbed Clips ek sath** yahan bhej do aur bhejne ke baad niche button dabao:",
+                "✅ **Main Episode Saved!**\n\n"
+                "Ab apni **saari Hindi Dubbed Clips (Video + Voice)** yahan bhej do aur bhejne ke baad niche button dabao:",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🚀 Mix & Process Dubbed Episode", callback_data="process_dub_final")],
                     [InlineKeyboardButton("❌ Cancel", callback_data="back_to_menu")]
@@ -542,7 +530,7 @@ async def receive_video_handler(client, message):
         return
 
     # Step 2: Receiving Dubbed Clips safely
-    if user_id in WAITING_FOR_DUB_CLIPS or os.path.exists(muted_episode_path):
+    if user_id in WAITING_FOR_DUB_CLIPS or os.path.exists(os.path.join(ud, "main_ep.mp4")):
         if user_id not in WAITING_FOR_DUB_CLIPS:
             WAITING_FOR_DUB_CLIPS.add(user_id)
 
@@ -586,7 +574,7 @@ async def receive_video_handler(client, message):
         reply_markup=quality_keyboard
     )
 
-# ⚙️ PROCESS & MERGE DUBBED MIX FINAL CALLBACK (PERFECT VIDEO & AUDIO CONCAT DUBBING)
+# ⚙️ PROCESS & MERGE DUBBED MIX FINAL CALLBACK (LIPSYNC VIDEO + HINDI VOICE CONCAT)
 @app.on_callback_query(filters.regex("process_dub_final"))
 async def process_dub_final_callback(client, callback_query):
     user_id = callback_query.from_user.id
@@ -596,12 +584,8 @@ async def process_dub_final_callback(client, callback_query):
         return
 
     ud = get_user_dir(user_id)
-    episode_path = os.path.join(ud, "muted_episode.mp4")
+    main_ep = os.path.join(ud, "main_ep.mp4")
     
-    if not os.path.exists(episode_path):
-        await callback_query.answer("❌ Pehle Main Episode bhejo!", show_alert=True)
-        return
-
     PROCESSING_USERS.add(user_id)
     await callback_query.answer("🚀 Processing start ho gayi hai...")
 
@@ -612,13 +596,13 @@ async def process_dub_final_callback(client, callback_query):
 
     clips = sorted([os.path.join(ud, f) for f in os.listdir(ud) if f.startswith("clip_")])
 
-    status_msg = await callback_query.message.edit_text(f"⚙️ **Processing Dub Mix:** Syncing {len(clips)} lip-synced dubbed clips with Episode Video...")
+    status_msg = await callback_query.message.edit_text(f"⚙️ **Processing Dub Mix:** Merging {len(clips)} Hindi lipsync dubbed clips with Voice...")
     output_final = os.path.abspath(f"final_synced_episode_{user_id}.mp4")
     
     try:
-        if not clips:
-            shutil.copy(episode_path, output_final)
-        else:
+        if not clips and os.path.exists(main_ep):
+            shutil.copy(main_ep, output_final)
+        elif clips:
             inputs = []
             filter_complex = ""
             valid_clips = 0
@@ -646,18 +630,19 @@ async def process_dub_final_callback(client, callback_query):
                 await process.wait()
             
             if not os.path.exists(output_final) or os.path.getsize(output_final) < 1024:
-                shutil.copy(episode_path, output_final)
+                if os.path.exists(main_ep):
+                    shutil.copy(main_ep, output_final)
         
         banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
         thumb_path = banner_file if os.path.exists(banner_file) else None
 
-        await status_msg.edit("📤 **Uploading Final Synced Dubbed Episode...**")
+        await status_msg.edit("📤 **Uploading Final Synced Hindi Dubbed Episode...**")
         await client.send_video(
             chat_id=callback_query.message.chat.id,
             video=output_final,
             thumb=thumb_path,
             supports_streaming=True,
-            caption="🎬 **Final Hindi Dubbed Anime Episode (Perfect Lip-Sync & Video Merged)**"
+            caption="🎬 **Final Hindi Dubbed Anime Episode (Lipsync Video + Voice 100% Working)**"
         )
         await status_msg.delete()
         
