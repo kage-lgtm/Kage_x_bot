@@ -62,7 +62,6 @@ WAITING_FOR_DOWNLOAD_LINK = set()
 WAITING_FOR_MAIN_EPISODE = set()
 WAITING_FOR_DUB_CLIPS = set()
 
-# Global Robust RAM Session Memory
 DUB_SESSIONS_MEMORY = {}
 
 def is_authorized(user_id):
@@ -491,13 +490,14 @@ async def receive_video_handler(client, message):
     if message.document and not message.document.mime_type.startswith("video"):
         return
 
+    muted_path = os.path.abspath(f"muted_ep_{user_id}.mp4")
+
     # Step 1: Receiving Main Episode in Dub Studio
     if user_id in WAITING_FOR_MAIN_EPISODE:
         WAITING_FOR_MAIN_EPISODE.remove(user_id)
         status_msg = await message.reply_text("📥 **Downloading Main Episode & muting original audio...**")
         
         input_path = f"main_ep_{user_id}.mp4"
-        muted_path = os.path.abspath(f"muted_ep_{user_id}.mp4")
         
         try:
             await message.download(file_name=input_path)
@@ -528,12 +528,10 @@ async def receive_video_handler(client, message):
             await status_msg.edit(f"❌ Error: `{str(e)}`")
         return
 
-    # Step 2: Receiving Dubbed Clips safely into RAM Memory
-    if user_id in WAITING_FOR_DUB_CLIPS or user_id in DUB_SESSIONS_MEMORY:
+    # Step 2: Receiving Dubbed Clips safely (Auto-fallback to disk file if session memory resets)
+    if user_id in WAITING_FOR_DUB_CLIPS or os.path.exists(muted_path):
         if user_id not in DUB_SESSIONS_MEMORY:
-            # Fallback if state got out of sync
-            await message.reply_text("❌ Session reset ho gaya hai! Kripya Dub Studio dubara open karein.")
-            return
+            DUB_SESSIONS_MEMORY[user_id] = {"episode": muted_path, "clips": []}
             
         clip_path = os.path.abspath(f"clip_{user_id}_{int(time.time())}_{len(DUB_SESSIONS_MEMORY[user_id]['clips'])}.mp4")
         await message.download(file_name=clip_path)
@@ -582,17 +580,25 @@ async def receive_video_handler(client, message):
 @app.on_callback_query(filters.regex("process_dub_final"))
 async def process_dub_final_callback(client, callback_query):
     user_id = callback_query.from_user.id
-    if user_id not in DUB_SESSIONS_MEMORY or not DUB_SESSIONS_MEMORY[user_id].get("episode"):
+    muted_path = os.path.abspath(f"muted_ep_{user_id}.mp4")
+    
+    # Absolute foolproof check: Get from memory or directly look on disk
+    episode_path = None
+    if user_id in DUB_SESSIONS_MEMORY and DUB_SESSIONS_MEMORY[user_id].get("episode"):
+        episode_path = DUB_SESSIONS_MEMORY[user_id]["episode"]
+    elif os.path.exists(muted_path):
+        episode_path = muted_path
+        
+    if not episode_path or not os.path.exists(episode_path):
         await callback_query.answer("❌ Pehle Main Episode bhejo!", show_alert=True)
         return
         
-    session = DUB_SESSIONS_MEMORY[user_id]
-    episode_path = session["episode"]
-    clips = session["clips"]
-    
-    if not episode_path or not os.path.exists(episode_path):
-        await callback_query.answer("❌ Episode file nahi mili! Pehle Main Episode bhej kar try karein.", show_alert=True)
-        return
+    clips = []
+    if user_id in DUB_SESSIONS_MEMORY:
+        clips = DUB_SESSIONS_MEMORY[user_id].get("clips", [])
+    else:
+        # Fallback to scan all saved clip files on disk for this user if memory got cleared
+        clips = [os.path.abspath(f) for f in os.listdir(".") if f.startswith(f"clip_{user_id}_")]
 
     status_msg = await callback_query.message.edit_text(f"⚙️ **Processing Dub Mix:** {len(clips)} clips received. Removing noise & merging audio...")
     output_final = os.path.abspath(f"final_synced_episode_{user_id}.mp4")
