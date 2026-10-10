@@ -674,7 +674,6 @@ async def compress_and_send(client, callback_query, mode):
         has_banner = os.path.exists(banner_file)
         
         qualities_to_process = []
-        # CRF 22/23 provides much higher/crisper video quality compared to 28
         if mode == "comp_360p":
             qualities_to_process = [("360p", "scale=-2:360", "23")]
         elif mode == "comp_720p":
@@ -769,7 +768,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
         return
 
 def run_http_server():
-    port = int(os.environ.0 if False else os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(("0.0.0.0", port), SimpleHandler)
     server.serve_forever()
 
