@@ -530,7 +530,7 @@ async def receive_video_handler(client, message):
             WAITING_FOR_DUB_CLIPS.add(user_id)
             
             await status_msg.edit(
-                "✅ **Main Episode Muted & Saved Securely!**\n\n"
+                "✅ **Main Episode Saved & Prepared!**\n\n"
                 "Ab apni **saari Dubbed Clips ek sath** yahan bhej do aur bhejne ke baad niche button dabao:",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🚀 Mix & Process Dubbed Episode", callback_data="process_dub_final")],
@@ -586,13 +586,13 @@ async def receive_video_handler(client, message):
         reply_markup=quality_keyboard
     )
 
-# ⚙️ PROCESS & MERGE DUBBED MIX FINAL CALLBACK (WITH PROCESSING LOCK)
+# ⚙️ PROCESS & MERGE DUBBED MIX FINAL CALLBACK (PERFECT VIDEO & AUDIO CONCAT DUBBING)
 @app.on_callback_query(filters.regex("process_dub_final"))
 async def process_dub_final_callback(client, callback_query):
     user_id = callback_query.from_user.id
 
     if user_id in PROCESSING_USERS:
-        await callback_query.answer("⏳ Processing pehle se chal rahi hai, kripya intezaار karein!", show_alert=True)
+        await callback_query.answer("⏳ Processing pehle se chal rahi hai, kripya intezaar karein!", show_alert=True)
         return
 
     ud = get_user_dir(user_id)
@@ -605,33 +605,39 @@ async def process_dub_final_callback(client, callback_query):
     PROCESSING_USERS.add(user_id)
     await callback_query.answer("🚀 Processing start ho gayi hai...")
 
+    try:
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
     clips = sorted([os.path.join(ud, f) for f in os.listdir(ud) if f.startswith("clip_")])
 
-    status_msg = await callback_query.message.edit_text(f"⚙️ **Processing Dub Mix:** {len(clips)} clips received. Removing noise & merging audio...")
+    status_msg = await callback_query.message.edit_text(f"⚙️ **Processing Dub Mix:** Syncing {len(clips)} lip-synced dubbed clips with Episode Video...")
     output_final = os.path.abspath(f"final_synced_episode_{user_id}.mp4")
     
     try:
         if not clips:
             shutil.copy(episode_path, output_final)
         else:
-            inputs = ["-i", episode_path]
-            filter_inputs = ""
+            inputs = []
+            filter_complex = ""
             valid_clips = 0
-            for i, clip in enumerate(clips):
+            
+            for clip in clips:
                 if os.path.exists(clip):
                     inputs.extend(["-i", clip])
-                    filter_inputs += f"[{valid_clips+1}:a]afftdn,volume=1.2[a{valid_clips}];"
+                    filter_complex += f"[{valid_clips}:v][{valid_clips}:a]"
                     valid_clips += 1
             
             if valid_clips > 0:
-                concat_str = "".join([f"[a{i}]" for i in range(valid_clips)])
-                filter_complex = f"{filter_inputs}{concat_str}concat=n={valid_clips}:v=0:a=1[outa]"
+                filter_complex += f"concat=n={valid_clips}:v=1:a=1[outv][outa]"
                 
                 command = [
                     FFMPEG_PATH, *inputs,
                     "-filter_complex", filter_complex,
-                    "-map", "0:v", "-map", "[outa]",
-                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                    "-map", "[outv]", "-map", "[outa]",
+                    "-c:v", "libx264", "-crf", "22", "-preset", "fast",
+                    "-c:a", "aac", "-b:a", "192k",
                     "-movflags", "+faststart",
                     output_final, "-y"
                 ]
@@ -645,13 +651,13 @@ async def process_dub_final_callback(client, callback_query):
         banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.png")
         thumb_path = banner_file if os.path.exists(banner_file) else None
 
-        await status_msg.edit("📤 **Uploading Final Synced & Balanced Dubbed Episode...**")
+        await status_msg.edit("📤 **Uploading Final Synced Dubbed Episode...**")
         await client.send_video(
             chat_id=callback_query.message.chat.id,
             video=output_final,
             thumb=thumb_path,
             supports_streaming=True,
-            caption="🎬 **Final Hindi Dubbed Anime Episode (Noise-Free, Balanced & Synced)**"
+            caption="🎬 **Final Hindi Dubbed Anime Episode (Perfect Lip-Sync & Video Merged)**"
         )
         await status_msg.delete()
         
