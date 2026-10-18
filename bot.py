@@ -81,7 +81,6 @@ def log_activity(user_id, username, action_type, details):
         logging.info(f"Supabase Log Error: {e}")
 
 async def get_video_metadata(file_path):
-    """FFmpeg probe to extract exact width, height, and duration for Telegram video cover rendering."""
     ffprobe_path = FFMPEG_PATH.replace("ffmpeg", "ffprobe")
     if not os.path.exists(ffprobe_path):
         ffprobe_path = "ffprobe"
@@ -291,7 +290,6 @@ async def back_to_menu(client, callback_query):
     
     await start_command(client, callback_query.message)
 
-# 🖼️ PHOTO/DOCUMENT HANDLER FOR CUSTOM THUMBNAIL SETUP
 @app.on_message((filters.photo | filters.document) & filters.private)
 async def receive_banner_media(client, message):
     user_id = message.from_user.id
@@ -378,21 +376,33 @@ async def handle_video_with_cover(client, message, user_id):
     elif message.document and message.document.file_name:
         original_name = message.document.file_name
 
-    status_msg = await message.reply_text("📥 **Processing video for Telegram HD cover thumbnail...**")
+    status_msg = await message.reply_text("📥 **Processing video & converting to MP4 for Telegram preview...**")
     
     input_file = os.path.join(ud, f"input_{user_id}{os.path.splitext(original_name)[1]}")
+    output_mp4 = os.path.join(ud, f"output_{user_id}.mp4")
     resized_thumb = os.path.join(ud, f"thumb_{user_id}.jpg")
     banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.jpg")
     
     try:
         downloaded_path = await message.download(file_name=input_file)
         
-        # Read exact dimensions of video so Telegram accepts the custom cover image
-        width, height, duration = await get_video_metadata(downloaded_path)
+        # Instant Remux MKV/WebM to MP4 container (Zero quality loss, 0% re-encoding time)
+        cmd_remux = [
+            FFMPEG_PATH, "-i", downloaded_path,
+            "-c", "copy",
+            "-movflags", "+faststart",
+            output_mp4, "-y"
+        ]
+        proc_r = await asyncio.create_subprocess_exec(*cmd_remux, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        await proc_r.wait()
+        
+        final_video = output_mp4 if os.path.exists(output_mp4) and os.path.getsize(output_mp4) > 1024 else downloaded_path
+        
+        # Extract width, height, duration
+        width, height, duration = await get_video_metadata(final_video)
         
         thumb_to_use = None
         if banner_file and os.path.exists(banner_file):
-            # Scale banner to 320px width maintaining aspect ratio for Telegram thumbnail preview spec
             cmd_thumb = [
                 FFMPEG_PATH, "-i", banner_file,
                 "-vf", "scale=320:-1",
@@ -404,16 +414,19 @@ async def handle_video_with_cover(client, message, user_id):
             if os.path.exists(resized_thumb):
                 thumb_to_use = resized_thumb
 
-        await status_msg.edit("📤 **Uploading video with HD Custom Cover...**")
+        base_name, _ = os.path.splitext(original_name)
+        final_filename = f"{base_name}.mp4"
+
+        await status_msg.edit("📤 **Uploading video with HD Cover Thumbnail...**")
         await client.send_video(
             chat_id=message.chat.id,
-            video=downloaded_path,
+            video=final_video,
             thumb=thumb_to_use,
             width=width,
             height=height,
             duration=duration,
             supports_streaming=True,
-            caption=f"📁 `{original_name}` (Full HD Cover Attached)"
+            caption=f"📁 `{final_filename}` (Full HD Cover Attached)"
         )
         await status_msg.delete()
         
