@@ -119,7 +119,7 @@ async def start_command(client, message):
         photo=banner_url,
         caption=(
             f"👋 **Hello {username}!**\n\n"
-            f"Welcome to **Kage x Bot** (HD Thumbnail Attacher) 🐼🚀\n"
+            f"Welcome to **Kage x Bot** (Full HD Auto Thumbnail Attacher) 🐼🚀\n"
             f"Devloper :- @kage_x_edit\n"
             f"Join channel\nhttps://t.me/+VzwHuVRPyLjOGJl\n\n"
             f"Neeche diye gaye buttons se features explore karein:"
@@ -246,7 +246,7 @@ async def set_banner_menu(client, callback_query):
         return
     USER_SETTING_BANNER.add(callback_query.from_user.id)
     await callback_query.message.edit_text(
-        "🖼 **Custom Thumbnail Setup**\n\nApni Custom Thumbnail image (Photo ya Document) yahan bhej do:",
+        "🖼 **Custom Thumbnail Setup**\n\nApni Full HD Custom Thumbnail image (Photo ya Document) yahan bhej do:",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu")]])
     )
 
@@ -287,7 +287,7 @@ async def receive_banner_media(client, message):
             USER_BANNERS[user_id] = banner_path
             
             await message.reply_text(
-                "✅ **Custom Thumbnail Saved Successfully!**\nAb aap jab bhi video bhejenge, yeh thumbnail properly attach ho jayegi.",
+                "✅ **Full HD Custom Thumbnail Saved Successfully!**\nAb aap jab bhi video bhejenge, yeh thumbnail HD cover ke sath attach ho jayegi.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
             )
             return
@@ -300,7 +300,7 @@ async def receive_banner_media(client, message):
         if not fname.endswith(('.mp4', '.mkv', '.mov', '.webm', '.avi', '.m4v')):
             return
 
-    await handle_video_with_thumbnail(client, message, user_id)
+    await handle_video_with_hd_thumbnail(client, message, user_id)
 
 @app.on_message(filters.video & filters.private)
 async def receive_video_direct(client, message):
@@ -310,9 +310,9 @@ async def receive_video_direct(client, message):
         return
     if user_id in USER_SETTING_BANNER:
         return
-    await handle_video_with_thumbnail(client, message, user_id)
+    await handle_video_with_hd_thumbnail(client, message, user_id)
 
-async def handle_video_with_thumbnail(client, message, user_id):
+async def handle_video_with_hd_thumbnail(client, message, user_id):
     ud = get_user_dir(user_id)
 
     if user_id in WAITING_FOR_MAIN_EPISODE:
@@ -354,36 +354,63 @@ async def handle_video_with_thumbnail(client, message, user_id):
     elif message.document and message.document.file_name:
         original_name = message.document.file_name
 
-    status_msg = await message.reply_text("📥 **Processing video with thumbnail...**")
+    status_msg = await message.reply_text("📥 **Downloading video for HD thumbnail attachment...**")
     
     input_file = os.path.join(ud, f"input_{user_id}{os.path.splitext(original_name)[1]}")
+    output_file = os.path.join(ud, f"output_thumb_{user_id}.mp4")
+    resized_thumb = os.path.join(ud, f"thumb_{user_id}.jpg")
     banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.jpg")
     
     try:
         downloaded_path = await message.download(file_name=input_file)
+        has_banner = banner_file and os.path.exists(banner_file)
         
-        # Prepare valid Telegram thumbnail using FFmpeg to resize banner to optimal JPEG spec
-        thumb_to_use = None
-        if banner_file and os.path.exists(banner_file):
-            resized_thumb = os.path.join(ud, f"thumb_{user_id}.jpg")
-            cmd_thumb = [
+        if has_banner:
+            await status_msg.edit("⚙️ **Preparing HD Thumbnail & Remuxing Video (Zero Quality Loss)...**")
+            
+            # Step 1: Resize banner to optimal Telegram thumbnail size (320px width, high quality)
+            cmd_thumb_resize = [
                 FFMPEG_PATH, "-i", banner_file,
                 "-vf", "scale=320:-1",
                 "-q:v", "2",
                 resized_thumb, "-y"
             ]
-            proc = await asyncio.create_subprocess_exec(*cmd_thumb, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-            await proc.wait()
-            if os.path.exists(resized_thumb):
-                thumb_to_use = resized_thumb
+            proc_t = await asyncio.create_subprocess_exec(*cmd_thumb_resize, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            await proc_t.wait()
 
-        await status_msg.edit("📤 **Uploading video with Custom Thumbnail...**")
+            # Step 2: Remux MKV/MP4 to MP4 container with stream copy and embed thumbnail as attached pic
+            command = [
+                FFMPEG_PATH, "-i", downloaded_path, "-i", banner_file,
+                "-map", "0:v", "-map", "0:a?", "-map", "1:v",
+                "-c:v", "copy", "-c:a", "copy",
+                "-disposition:v:1", "attached_pic",
+                "-movflags", "+faststart",
+                output_file, "-y"
+            ]
+            process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            await process.wait()
+            
+            if os.path.exists(output_file) and os.path.getsize(output_file) > 1024:
+                final_video_path = output_file
+                base_name, _ = os.path.splitext(original_name)
+                final_filename = f"{base_name}.mp4"
+            else:
+                final_video_path = downloaded_path
+                final_filename = original_name
+
+            thumb_to_use = resized_thumb if os.path.exists(resized_thumb) else banner_file
+        else:
+            final_video_path = downloaded_path
+            final_filename = original_name
+            thumb_to_use = None
+
+        await status_msg.edit("📤 **Uploading video with HD Thumbnail...**")
         await client.send_video(
             chat_id=message.chat.id,
-            video=downloaded_path,
+            video=final_video_path,
             thumb=thumb_to_use,
             supports_streaming=True,
-            caption=f"📁 `{original_name}` (Original Video with Custom Thumbnail)"
+            caption=f"📁 `{final_filename}` (Full HD Custom Thumbnail Attached)"
         )
         await status_msg.delete()
         
@@ -393,6 +420,7 @@ async def handle_video_with_thumbnail(client, message, user_id):
         if os.path.exists(ud):
             shutil.rmtree(ud)
 
+# Dub Sync & Mix Studio Processor
 @app.on_callback_query(filters.regex("process_dub_final"))
 async def process_dub_final_callback(client, callback_query):
     user_id = callback_query.from_user.id
