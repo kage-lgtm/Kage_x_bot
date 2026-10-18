@@ -272,12 +272,14 @@ async def back_to_menu(client, callback_query):
     
     await start_command(client, callback_query.message)
 
+# 🖼️ PHOTO HANDLER: ONLY FOR THUMBNAIL (NO COMPRESSION CONFLICT)
 @app.on_message(filters.photo & filters.private)
 async def receive_photo(client, message):
     user_id = message.from_user.id
     if not is_authorized(user_id):
         return
 
+    # Check if user actually intended to set a banner/thumbnail
     if user_id in USER_SETTING_BANNER:
         USER_SETTING_BANNER.remove(user_id)
         banner_path = f"banner_{user_id}.jpg"
@@ -285,18 +287,18 @@ async def receive_photo(client, message):
         USER_BANNERS[user_id] = downloaded_banner or banner_path
         
         await message.reply_text(
-            "✅ **Thumbnail Saved Successfully!**\nAb compression ke baad video ka thumbnail cover yahi dikhega.",
+            "✅ **Custom Thumbnail Saved Successfully!**\nAb aap jab bhi video bhejenge, yeh thumbnail us par lag kar aayegi.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
         )
+    else:
+        await message.reply_text("🖼️ Thumbnail set karne ke liye pehle menu se **Set Custom Thumbnail** par click karein.")
 
+# 🎬 VIDEO HANDLER: ONLY FOR VIDEOS
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video_handler(client, message):
     user_id = message.from_user.id
     if not is_authorized(user_id):
         await message.reply_text("❌ Aapke paas access nahi hai!")
-        return
-
-    if user_id in USER_SETTING_BANNER:
         return
 
     if message.document:
@@ -446,6 +448,7 @@ async def compress_and_send(client, callback_query, mode):
     
     try:
         downloaded_path = await msg.download(file_name=input_file)
+        
         thumb_to_use = banner_file if os.path.exists(banner_file) else None
         if not thumb_to_use:
             try:
@@ -472,10 +475,9 @@ async def compress_and_send(client, callback_query, mode):
             ]
 
         for q_label, scale_filter, crf_val in qualities:
-            await status_msg.edit(f"⚙️ **Panda Compressing to {q_label} (High Clarity, Playback Fixed)...**")
+            await status_msg.edit(f"⚙️ **Panda Compressing to {q_label} (High Clarity, Thumbnail Attached)...**")
             output_file = f"output_{user_id}_{q_label}.mp4"
             
-            # -pix_fmt yuv420p & -movflags +faststart ensure video plays everywhere smoothly!
             command = [
                 FFMPEG_PATH, "-i", downloaded_path,
                 "-vf", scale_filter,
@@ -498,7 +500,7 @@ async def compress_and_send(client, callback_query, mode):
                 os.remove(final_path)
             os.rename(final_output, final_path)
             
-            await status_msg.edit(f"📤 **Sending {q_label} video...**")
+            await status_msg.edit(f"📤 **Sending {q_label} video with Custom Thumbnail...**")
             await client.send_video(
                 chat_id=callback_query.message.chat.id, video=final_path,
                 thumb=thumb_to_use, supports_streaming=True, caption=f"📁 `{new_filename}` ({q_label} Panda Compressed)"
