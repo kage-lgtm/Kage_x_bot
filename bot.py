@@ -9,7 +9,6 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from supabase import create_client, Client as SupabaseClient
 import imageio_ffmpeg
-from PIL import Image  # High quality image conversion ke liye
 import yt_dlp
 from datetime import datetime
 
@@ -248,7 +247,7 @@ async def set_banner_menu(client, callback_query):
         return
     USER_SETTING_BANNER.add(callback_query.from_user.id)
     await callback_query.message.edit_text(
-        "🖼 **Custom Thumbnail Setup**\n\nApni Thumbnail image **Document** ke roop mein ya High Quality photo bhej do:",
+        "🖼 **Custom Thumbnail Setup**\n\nApni Thumbnail image photo ya document ke roop mein bhej do:",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu")]])
     )
 
@@ -269,7 +268,7 @@ async def back_to_menu(client, callback_query):
     
     await start_command(client, callback_query.message)
 
-# 🖼️ PHOTO OR DOCUMENT HANDLER (CONVERTS TO JPG AUTOMATICALLY FOR TELEGRAM COMPATIBILITY)
+# 🖼️ PHOTO OR DOCUMENT HANDLER (NO PIL DEPENDENCY)
 @app.on_message((filters.photo | filters.document) & filters.private)
 async def receive_banner_media(client, message):
     user_id = message.from_user.id
@@ -278,34 +277,24 @@ async def receive_banner_media(client, message):
 
     if user_id in USER_SETTING_BANNER:
         USER_SETTING_BANNER.remove(user_id)
-        raw_banner_path = f"raw_banner_{user_id}"
-        final_banner_path = f"banner_{user_id}.jpg"
+        banner_path = f"banner_{user_id}.jpg"
         
         try:
             if message.document:
-                await message.download(file_name=raw_banner_path)
+                await message.download(file_name=banner_path)
             else:
-                await client.download_media(message.photo.file_id, file_name=raw_banner_path)
-            
-            # Convert any image (PNG, WebP, etc.) to high quality JPEG format using Pillow
-            img = Image.open(raw_banner_path)
-            if img.mode in ("RGBA", "P"):
-                img = img.convert("RGB")
-            img.save(final_banner_path, "JPEG", quality=95)
-            
-            if os.path.exists(raw_banner_path):
-                os.remove(raw_banner_path)
+                await client.download_media(message.photo.file_id, file_name=banner_path)
                 
-            USER_BANNERS[user_id] = final_banner_path
+            USER_BANNERS[user_id] = banner_path
             
             await message.reply_text(
-                "✅ **Full HD Custom Thumbnail Saved Successfully!**\nAb aap jab bhi video bhejenge, yeh HD thumbnail us par properly attach hokar aayegi.",
+                "✅ **Custom Thumbnail Saved Successfully!**\nAb aap jab bhi video bhejenge, yeh thumbnail us par attach hokar aayegi.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
             )
         except Exception as e:
             await message.reply_text(f"❌ Thumbnail saving error: `{str(e)}`")
 
-# 🎬 VIDEO HANDLER: ZERO COMPRESSION, 100% WORKING HD THUMBNAIL ATTACHMENT
+# 🎬 VIDEO HANDLER: ZERO COMPRESSION, DIRECT HD THUMBNAIL ATTACHMENT
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video_handler(client, message):
     user_id = message.from_user.id
@@ -359,24 +348,22 @@ async def receive_video_handler(client, message):
     elif message.document and message.document.file_name:
         original_name = message.document.file_name
 
-    status_msg = await message.reply_text("📥 **Downloading video for HD thumbnail attachment...**")
+    status_msg = await message.reply_text("📥 **Downloading video for thumbnail attachment...**")
     
     input_file = os.path.join(ud, f"input_{user_id}{os.path.splitext(original_name)[1]}")
     banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.jpg")
     
     try:
         downloaded_path = await message.download(file_name=input_file)
-        
-        # Ensure thumbnail exists and is valid JPEG
         thumb_to_use = banner_file if (banner_file and os.path.exists(banner_file)) else None
 
-        await status_msg.edit("📤 **Uploading video with Full HD Thumbnail...**")
+        await status_msg.edit("📤 **Uploading video with Custom Thumbnail...**")
         await client.send_video(
             chat_id=message.chat.id,
             video=downloaded_path,
             thumb=thumb_to_use,
             supports_streaming=True,
-            caption=f"📁 `{original_name}` (Original Video with Full HD Custom Thumbnail)"
+            caption=f"📁 `{original_name}` (Original Video with Custom Thumbnail)"
         )
         await status_msg.delete()
         
