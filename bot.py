@@ -1,14 +1,12 @@
 import os
 import logging
 import asyncio
-import re
 import time
 import shutil
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import FloodWait
 from supabase import create_client, Client as SupabaseClient
 import imageio_ffmpeg
 import yt_dlp
@@ -278,19 +276,15 @@ async def receive_banner_media(client, message):
         return
 
     if user_id in USER_SETTING_BANNER:
-        USER_SETINT_BANNER_ACTIVE = False
         USER_SETTING_BANNER.remove(user_id)
-        
         banner_path = f"banner_{user_id}.jpg"
         
-        # Download highest quality uncompressed file if sent as document or photo
         if message.document:
             if not message.document.file_name.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
                 await message.reply_text("❌ Kripya valid image file (.jpg, .png) bhejein!")
                 return
             await message.download(file_name=banner_path)
         else:
-            # Download highest available resolution photo from photo array
             await client.download_media(message.photo.file_id, file_name=banner_path)
             
         USER_BANNERS[user_id] = banner_path
@@ -300,7 +294,7 @@ async def receive_banner_media(client, message):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
         )
 
-# 🎬 VIDEO HANDLER: ZERO COMPRESSION + PERMANENT HD THUMBNAIL EMBEDDING VIA FFMPEG
+# 🎬 VIDEO HANDLER: ZERO CONVERSION ERRORS, NATIVE THUMBNAIL ATTACHMENT
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video_handler(client, message):
     user_id = message.from_user.id
@@ -308,7 +302,6 @@ async def receive_video_handler(client, message):
         await message.reply_text("❌ Aapke paas access nahi hai!")
         return
 
-    # If it's a document but not a video format, ignore
     if message.document:
         fname = (message.document.file_name or "").lower()
         if not fname.endswith(('.mp4', '.mkv', '.mov', '.webm', '.avi', '.m4v')):
@@ -349,41 +342,26 @@ async def receive_video_handler(client, message):
         )
         return
 
-    # Process Video with HD Thumbnail Embedded (Zero Video Quality Loss, Stream Copy)
-    original_name = message.video.file_name if message.video and message.video.file_name else (message.document.file_name if message.document else "video.mp4")
-    status_msg = await message.reply_text("📥 **Downloading video for HD thumbnail embedding...**")
+    # Direct Video Forwarding with Full HD Custom Thumbnail Attached (Zero Compression, Zero Errors)
+    original_name = "video.mp4"
+    if message.video and message.video.file_name:
+        original_name = message.video.file_name
+    elif message.document and message.document.file_name:
+        original_name = message.document.file_name
+
+    status_msg = await message.reply_text("📥 **Downloading video for HD thumbnail attachment...**")
     
-    input_file = os.path.join(ud, f"input_{user_id}.mp4")
-    output_file = os.path.join(ud, f"output_hd_{user_id}.mp4")
+    input_file = os.path.join(ud, f"input_{user_id}{os.path.splitext(original_name)[1]}")
     banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.jpg")
     
     try:
         downloaded_path = await message.download(file_name=input_file)
-        
-        has_banner = os.path.exists(banner_file)
-        thumb_to_use = banner_file if has_banner else None
-        
-        if has_banner:
-            await status_msg.edit("⚙️ **Embedding Full HD Thumbnail (Zero Compression)...**")
-            # Using ffmpeg stream copy with attachment muxing to ensure zero quality degradation
-            command = [
-                FFMPEG_PATH, "-i", downloaded_path, "-i", banner_file,
-                "-map", "0", "-map", "1",
-                "-c", "copy",
-                "-disposition:v:1", "attached_pic",
-                output_file, "-y"
-            ]
-            process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-            await process.wait()
-            
-            final_video_path = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
-        else:
-            final_video_path = downloaded_path
+        thumb_to_use = banner_file if os.path.exists(banner_file) else None
 
         await status_msg.edit("📤 **Uploading video with Full HD Thumbnail...**")
         await client.send_video(
             chat_id=message.chat.id,
-            video=final_video_path,
+            video=downloaded_path,
             thumb=thumb_to_use,
             supports_streaming=True,
             caption=f"📁 `{original_name}` (Original Video with Full HD Custom Thumbnail)"
