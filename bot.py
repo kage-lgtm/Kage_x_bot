@@ -11,7 +11,6 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait
 from supabase import create_client, Client as SupabaseClient
 import imageio_ffmpeg
-import subprocess
 import yt_dlp
 from datetime import datetime
 
@@ -49,7 +48,6 @@ if SESSION_STRING and len(SESSION_STRING) > 20:
 
 supabase: SupabaseClient = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-USER_VIDEOS = {}
 USER_SETTING_BANNER = set()
 USER_BANNERS = {}
 WAITING_FOR_DOWNLOAD_LINK = set()
@@ -124,7 +122,7 @@ async def start_command(client, message):
         photo=banner_url,
         caption=(
             f"👋 **Hello {username}!**\n\n"
-            f"Welcome to **Kage x Bot** (Panda Style Compressor) 🐼🚀\n"
+            f"Welcome to **Kage x Bot** (Original Video + Custom Thumbnail) 🐼🚀\n"
             f"Devloper :- @kage_x_edit\n"
             f"Join channel\nhttps://t.me/+VzwHuVRPyLjOGJl\n\n"
             f"Neeche diye gaye buttons se features explore karein:"
@@ -231,7 +229,7 @@ async def compress_menu(client, callback_query):
     if not is_authorized(callback_query.from_user.id):
         return
     await callback_query.message.edit_text(
-        "🗜 **Panda Style Compressor Studio**\n\nApni video yahan bhej do:",
+        "🖼 **Auto Thumbnail Attacher**\n\nApni video seedha bhej do (Video bilkul change nahi hogi, sirf aapki saved custom thumbnail lag kar wapas mil jayegi):",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu")]])
     )
 
@@ -272,14 +270,13 @@ async def back_to_menu(client, callback_query):
     
     await start_command(client, callback_query.message)
 
-# 🖼️ PHOTO HANDLER: ONLY FOR THUMBNAIL (NO COMPRESSION CONFLICT)
+# 🖼️ PHOTO HANDLER: ONLY FOR THUMBNAIL SETUP
 @app.on_message(filters.photo & filters.private)
 async def receive_photo(client, message):
     user_id = message.from_user.id
     if not is_authorized(user_id):
         return
 
-    # Check if user actually intended to set a banner/thumbnail
     if user_id in USER_SETTING_BANNER:
         USER_SETTING_BANNER.remove(user_id)
         banner_path = f"banner_{user_id}.jpg"
@@ -287,13 +284,13 @@ async def receive_photo(client, message):
         USER_BANNERS[user_id] = downloaded_banner or banner_path
         
         await message.reply_text(
-            "✅ **Custom Thumbnail Saved Successfully!**\nAb aap jab bhi video bhejenge, yeh thumbnail us par lag kar aayegi.",
+            "✅ **Custom Thumbnail Saved Successfully!**\nAb aap jab bhi video bhejenge, yeh thumbnail automatically us par attach hokar aayegi (Video compress nahi hogi).",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
         )
     else:
         await message.reply_text("🖼️ Thumbnail set karne ke liye pehle menu se **Set Custom Thumbnail** par click karein.")
 
-# 🎬 VIDEO HANDLER: ONLY FOR VIDEOS
+# 🎬 VIDEO HANDLER: NO COMPRESSION, ONLY ATTACH CUSTOM THUMBNAIL TO ORIGINAL VIDEO
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video_handler(client, message):
     user_id = message.from_user.id
@@ -327,7 +324,7 @@ async def receive_video_handler(client, message):
         return
 
     if user_id in WAITING_FOR_DUB_CLIPS or os.path.exists(os.path.join(ud, "main_ep.mp4")):
-        if user_id not in WAITING_FOR_DUB_CLIPS:
+        if user_id not in WAITING_FOR_DUB_CLPS if 'WAITING_FOR_DUB_CLPS' in globals() else user_id not in WAITING_FOR_DUB_CLIPS:
             WAITING_FOR_DUB_CLIPS.add(user_id)
         clip_name = f"clip_{int(time.time() * 1000)}_{len(os.listdir(ud))}.mp4"
         await message.download(file_name=os.path.join(ud, clip_name))
@@ -341,24 +338,33 @@ async def receive_video_handler(client, message):
         )
         return
 
-    USER_VIDEOS[user_id] = message
-    file_name = message.video.file_name if message.video and message.video.file_name else "video.mp4"
+    # Direct Original Video Forwarding with Custom Thumbnail Attached (Zero Compression)
+    status_msg = await message.reply_text("📥 **Processing original video with custom thumbnail...**")
     
-    quality_keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("📉 360p (~50MB)", callback_data="comp_360p"),
-            InlineKeyboardButton("📊 720p (~150MB)", callback_data="comp_720p")
-        ],
-        [
-            InlineKeyboardButton("📈 1080p (~300MB)", callback_data="comp_1080p"),
-            InlineKeyboardButton("🔥 All in 3 Qualities", callback_data="comp_all")
-        ]
-    ])
-
-    await message.reply_text(
-        f"🎬 **Video Received!**\n📁 File: `{file_name}`\n\nSelect compression quality (Panda Style):",
-        reply_markup=quality_keyboard
-    )
+    input_file = f"input_{user_id}.mp4"
+    banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.jpg")
+    
+    try:
+        downloaded_path = await message.download(file_name=input_file)
+        
+        # Use saved custom thumbnail if available
+        thumb_to_use = banner_file if os.path.exists(banner_file) else None
+        
+        await status_msg.edit("📤 **Sending original video with Custom Thumbnail...**")
+        await client.send_video(
+            chat_id=message.chat.id,
+            video=downloaded_path,
+            thumb=thumb_to_use,
+            supports_streaming=True,
+            caption="🎬 **Original Video with Custom Thumbnail Attached (Zero Compression)**"
+        )
+        await status_msg.delete()
+        
+    except Exception as e:
+        await status_msg.edit(f"❌ Error: `{str(e)}`")
+    finally:
+        if os.path.exists(input_file):
+            os.remove(input_file)
 
 @app.on_callback_query(filters.regex("process_dub_final"))
 async def process_dub_final_callback(client, callback_query):
@@ -427,102 +433,6 @@ async def process_dub_final_callback(client, callback_query):
             os.remove(output_final)
         PROCESSING_USERS.discard(user_id)
         WAITING_FOR_DUB_CLIPS.discard(user_id)
-
-async def compress_and_send(client, callback_query, mode):
-    user_id = callback_query.from_user.id
-    if not is_authorized(user_id):
-        await callback_query.answer("❌ Unauthorized!", show_alert=True)
-        return
-
-    if user_id not in USER_VIDEOS:
-        await callback_query.answer("⚠ Session expired!", show_alert=True)
-        return
-
-    msg = USER_VIDEOS[user_id]
-    original_name = msg.video.file_name if msg.video and msg.video.file_name else "video.mp4"
-    status_msg = await callback_query.message.edit_text("📥 **Downloading video...**")
-    
-    input_file = f"input_{user_id}.mp4"
-    extracted_thumb = f"thumb_{user_id}.jpg"
-    banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.jpg")
-    
-    try:
-        downloaded_path = await msg.download(file_name=input_file)
-        
-        thumb_to_use = banner_file if os.path.exists(banner_file) else None
-        if not thumb_to_use:
-            try:
-                cmd_thumb = [FFMPEG_PATH, "-ss", "00:00:02", "-i", downloaded_path, "-vframes", "1", "-q:v", "2", extracted_thumb, "-y"]
-                proc = await asyncio.create_subprocess_exec(*cmd_thumb, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                await proc.wait()
-                if os.path.exists(extracted_thumb):
-                    thumb_to_use = extracted_thumb
-            except Exception:
-                pass
-
-        qualities = []
-        if mode == "comp_360p":
-            qualities = [("360p", "scale=-2:360", "28")]
-        elif mode == "comp_720p":
-            qualities = [("720p", "scale=-2:720", "24")]
-        elif mode == "comp_1080p":
-            qualities = [("1080p", "scale=-2:1080", "21")]
-        elif mode == "comp_all":
-            qualities = [
-                ("360p", "scale=-2:360", "28"),
-                ("720p", "scale=-2:720", "24"),
-                ("1080p", "scale=-2:1080", "21")
-            ]
-
-        for q_label, scale_filter, crf_val in qualities:
-            await status_msg.edit(f"⚙️ **Panda Compressing to {q_label} (High Clarity, Thumbnail Attached)...**")
-            output_file = f"output_{user_id}_{q_label}.mp4"
-            
-            command = [
-                FFMPEG_PATH, "-i", downloaded_path,
-                "-vf", scale_filter,
-                "-c:v", "libx264", "-crf", crf_val, "-preset", "medium",
-                "-pix_fmt", "yuv420p",
-                "-c:a", "copy",
-                "-movflags", "+faststart",
-                output_file, "-y"
-            ]
-                
-            process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-            await process.wait()
-            
-            final_output = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
-            base_name, ext = os.path.splitext(original_name)
-            new_filename = f"{base_name}_{q_label}{ext}"
-            final_path = os.path.join(os.path.dirname(final_output), new_filename)
-            
-            if os.path.exists(final_path):
-                os.remove(final_path)
-            os.rename(final_output, final_path)
-            
-            await status_msg.edit(f"📤 **Sending {q_label} video with Custom Thumbnail...**")
-            await client.send_video(
-                chat_id=callback_query.message.chat.id, video=final_path,
-                thumb=thumb_to_use, supports_streaming=True, caption=f"📁 `{new_filename}` ({q_label} Panda Compressed)"
-            )
-            await asyncio.sleep(1)
-            if os.path.exists(final_path):
-                os.remove(final_path)
-
-        await status_msg.delete()
-    except Exception as e:
-        await status_msg.edit(f"❌ Error: `{str(e)}`")
-    finally:
-        if os.path.exists(input_file):
-            os.remove(input_file)
-        if os.path.exists(extracted_thumb):
-            os.remove(extracted_thumb)
-        if user_id in USER_VIDEOS:
-            del USER_VIDEOS[user_id]
-
-@app.on_callback_query(filters.regex(r"^comp_"))
-async def quality_callback_handler(client, callback_query):
-    await compress_and_send(client, callback_query, callback_query.data)
 
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
