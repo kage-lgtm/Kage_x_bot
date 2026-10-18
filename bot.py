@@ -227,7 +227,7 @@ async def compress_menu(client, callback_query):
     if not is_authorized(callback_query.from_user.id):
         return
     await callback_query.message.edit_text(
-        "🖼 **HD Thumbnail Attacher**\n\nApni video seedha bhej do (Video bilkul change nahi hogi, sirf Full HD custom thumbnail attach ho jayegi):",
+        "🖼 **HD Thumbnail Attacher**\n\nApni video seedha bhej do (Video bilkul change nahi hogi, sirf HD thumbnail attach ho jayegi):",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu")]])
     )
 
@@ -268,13 +268,14 @@ async def back_to_menu(client, callback_query):
     
     await start_command(client, callback_query.message)
 
-# 🖼️ PHOTO OR DOCUMENT HANDLER (NO PIL DEPENDENCY)
+# 🖼️ PHOTO OR DOCUMENT HANDLER FOR THUMBNAIL
 @app.on_message((filters.photo | filters.document) & filters.private)
 async def receive_banner_media(client, message):
     user_id = message.from_user.id
     if not is_authorized(user_id):
         return
 
+    # Agar user thumbnail set karne ki state mein hai
     if user_id in USER_SETTING_BANNER:
         USER_SETTING_BANNER.remove(user_id)
         banner_path = f"banner_{user_id}.jpg"
@@ -291,22 +292,31 @@ async def receive_banner_media(client, message):
                 "✅ **Custom Thumbnail Saved Successfully!**\nAb aap jab bhi video bhejenge, yeh thumbnail us par attach hokar aayegi.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
             )
+            return
         except Exception as e:
             await message.reply_text(f"❌ Thumbnail saving error: `{str(e)}`")
+            return
 
-# 🎬 VIDEO HANDLER: ZERO COMPRESSION, DIRECT HD THUMBNAIL ATTACHMENT
-@app.on_message((filters.video | filters.document) & filters.private)
-async def receive_video_handler(client, message):
-    user_id = message.from_user.id
-    if not is_authorized(user_id):
-        await message.reply_text("❌ Aapke paas access nahi hai!")
-        return
-
+    # Agar user video bhej raha hai (Document ya Video format mein)
     if message.document:
         fname = (message.document.file_name or "").lower()
         if not fname.endswith(('.mp4', '.mkv', '.mov', '.webm', '.avi', '.m4v')):
             return
 
+    await process_and_send_video(client, message, user_id)
+
+# 🎬 DEDICATED VIDEO PROCESSOR FUNCTION
+@app.on_message(filters.video & filters.private)
+async def receive_video_direct(client, message):
+    user_id = message.from_user.id
+    if not is_authorized(user_id):
+        await message.reply_text("❌ Aapke paas access nahi hai!")
+        return
+    if user_id in USER_SETTING_BANNER:
+        return
+    await process_and_send_video(client, message, user_id)
+
+async def process_and_send_video(client, message, user_id):
     ud = get_user_dir(user_id)
 
     if user_id in WAITING_FOR_MAIN_EPISODE:
