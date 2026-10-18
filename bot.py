@@ -48,6 +48,7 @@ supabase: SupabaseClient = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 USER_SETTING_BANNER = set()
 USER_BANNERS = {}
+USER_VIDEOS = {}
 WAITING_FOR_DOWNLOAD_LINK = set()
 WAITING_FOR_MAIN_EPISODE = set()
 WAITING_FOR_DUB_CLIPS = set()
@@ -110,8 +111,7 @@ async def start_command(client, message):
 
     if user_id == MAIN_OWNER:
         menu_buttons.append([
-            InlineKeyboardButton("📊 View Activity Logs", callback_data="view_logs"),
-            InlineKeyboardButton("🔒 Restricted Downloader", callback_data="restricted_dl_info")
+            InlineKeyboardButton("📊 View Activity Logs", callback_data="view_logs")
         ])
 
     menu_keyboard = InlineKeyboardMarkup(menu_buttons)
@@ -120,7 +120,7 @@ async def start_command(client, message):
         photo=banner_url,
         caption=(
             f"👋 **Hello {username}!**\n\n"
-            f"Welcome to **Kage x Bot** (HD Thumbnail Attacher) 🐼🚀\n"
+            f"Welcome to **Kage x Bot** (All-in-One Anime Suite) 🐼🚀\n"
             f"Devloper :- @kage_x_edit\n"
             f"Join channel\nhttps://t.me/+VzwHuVRPyLjOGJl\n\n"
             f"Neeche diye gaye buttons se features explore karein:"
@@ -227,7 +227,7 @@ async def compress_menu(client, callback_query):
     if not is_authorized(callback_query.from_user.id):
         return
     await callback_query.message.edit_text(
-        "🖼 **HD Thumbnail Attacher**\n\nApni video seedha bhej do (Video bilkul change nahi hogi, sirf HD thumbnail attach ho jayegi):",
+        "🗜 **Compressor Studio**\n\nApni video bhej do (Panda style compression ke liye options milenge):",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu")]])
     )
 
@@ -247,7 +247,7 @@ async def set_banner_menu(client, callback_query):
         return
     USER_SETTING_BANNER.add(callback_query.from_user.id)
     await callback_query.message.edit_text(
-        "🖼 **Custom Thumbnail Setup**\n\nApni Thumbnail image photo ya document ke roop mein bhej do:",
+        "🖼 **Custom Thumbnail Setup**\n\nApni Custom Thumbnail image (Photo ya Document) yahan bhej do:",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu")]])
     )
 
@@ -268,14 +268,13 @@ async def back_to_menu(client, callback_query):
     
     await start_command(client, callback_query.message)
 
-# 🖼️ PHOTO OR DOCUMENT HANDLER FOR THUMBNAIL
+# 🖼️ PHOTO/DOCUMENT HANDLER FOR CUSTOM THUMBNAIL
 @app.on_message((filters.photo | filters.document) & filters.private)
 async def receive_banner_media(client, message):
     user_id = message.from_user.id
     if not is_authorized(user_id):
         return
 
-    # Agar user thumbnail set karne ki state mein hai
     if user_id in USER_SETTING_BANNER:
         USER_SETTING_BANNER.remove(user_id)
         banner_path = f"banner_{user_id}.jpg"
@@ -289,7 +288,7 @@ async def receive_banner_media(client, message):
             USER_BANNERS[user_id] = banner_path
             
             await message.reply_text(
-                "✅ **Custom Thumbnail Saved Successfully!**\nAb aap jab bhi video bhejenge, yeh thumbnail us par attach hokar aayegi.",
+                "✅ **Custom Thumbnail Saved Successfully!**\nAb aap jab bhi video bhejenge, yeh thumbnail zero compression ke sath us par attach ho jayegi.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
             )
             return
@@ -297,15 +296,14 @@ async def receive_banner_media(client, message):
             await message.reply_text(f"❌ Thumbnail saving error: `{str(e)}`")
             return
 
-    # Agar user video bhej raha hai (Document ya Video format mein)
+    # Agar user normal video bhej raha hai
     if message.document:
         fname = (message.document.file_name or "").lower()
         if not fname.endswith(('.mp4', '.mkv', '.mov', '.webm', '.avi', '.m4v')):
             return
 
-    await process_and_send_video(client, message, user_id)
+    await handle_incoming_video(client, message, user_id)
 
-# 🎬 DEDICATED VIDEO PROCESSOR FUNCTION
 @app.on_message(filters.video & filters.private)
 async def receive_video_direct(client, message):
     user_id = message.from_user.id
@@ -314,11 +312,12 @@ async def receive_video_direct(client, message):
         return
     if user_id in USER_SETTING_BANNER:
         return
-    await process_and_send_video(client, message, user_id)
+    await handle_incoming_video(client, message, user_id)
 
-async def process_and_send_video(client, message, user_id):
+async def handle_incoming_video(client, message, user_id):
     ud = get_user_dir(user_id)
 
+    # Dubbing workflow: Main Episode
     if user_id in WAITING_FOR_MAIN_EPISODE:
         WAITING_FOR_MAIN_EPISODE.remove(user_id)
         status_msg = await message.reply_text("📥 **Downloading Main Episode...**")
@@ -337,6 +336,7 @@ async def process_and_send_video(client, message, user_id):
             await status_msg.edit(f"❌ Error: `{str(e)}`")
         return
 
+    # Dubbing workflow: Clips collection
     if user_id in WAITING_FOR_DUB_CLIPS or os.path.exists(os.path.join(ud, "main_ep.mp4")):
         if user_id not in WAITING_FOR_DUB_CLIPS:
             WAITING_FOR_DUB_CLIPS.add(user_id)
@@ -352,37 +352,117 @@ async def process_and_send_video(client, message, user_id):
         )
         return
 
-    original_name = "video.mp4"
-    if message.video and message.video.file_name:
-        original_name = message.video.file_name
-    elif message.document and message.document.file_name:
-        original_name = message.document.file_name
-
-    status_msg = await message.reply_text("📥 **Downloading video for thumbnail attachment...**")
+    # Normal Video / Compressor Studio Workflow
+    USER_VIDEOS[user_id] = message
+    file_name = message.video.file_name if message.video and message.video.file_name else (message.document.file_name if message.document else "video.mp4")
     
+    quality_keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📉 360p (~50MB)", callback_data="comp_360p"),
+            InlineKeyboardButton("📊 720p (~150MB)", callback_data="comp_720p")
+        ],
+        [
+            InlineKeyboardButton("📈 1080p (~300MB)", callback_data="comp_1080p"),
+            InlineKeyboardButton("🔥 Zero Compression (Sirf Thumbnail)", callback_data="comp_zerocompress")
+        ]
+    ])
+
+    await message.reply_text(
+        f"🎬 **Video Received!**\n📁 File: `{file_name}`\n\nSelect action:",
+        reply_markup=quality_keyboard
+    )
+
+# Compressor / Thumbnail Sender Handler
+@app.on_callback_query(filters.regex(r"^comp_"))
+async def quality_callback_handler(client, callback_query):
+    user_id = callback_query.from_user.id
+    if not is_authorized(user_id):
+        await callback_query.answer("❌ Unauthorized!", show_alert=True)
+        return
+
+    if user_id not in USER_VIDEOS:
+        await callback_query.answer("⚠ Session expired! Dobara video bhejein.", show_alert=True)
+        return
+
+    mode = callback_query.data
+    msg = USER_VIDEOS[user_id]
+    original_name = msg.video.file_name if msg.video and msg.video.file_name else (msg.document.file_name if msg.document else "video.mp4")
+    status_msg = await callback_query.message.edit_text("📥 **Downloading video...**")
+    
+    ud = get_user_dir(user_id)
     input_file = os.path.join(ud, f"input_{user_id}{os.path.splitext(original_name)[1]}")
     banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.jpg")
     
     try:
-        downloaded_path = await message.download(file_name=input_file)
+        downloaded_path = await msg.download(file_name=input_file)
         thumb_to_use = banner_file if (banner_file and os.path.exists(banner_file)) else None
 
-        await status_msg.edit("📤 **Uploading video with Custom Thumbnail...**")
-        await client.send_video(
-            chat_id=message.chat.id,
-            video=downloaded_path,
-            thumb=thumb_to_use,
-            supports_streaming=True,
-            caption=f"📁 `{original_name}` (Original Video with Custom Thumbnail)"
-        )
-        await status_msg.delete()
-        
+        if mode == "comp_zerocompress":
+            await status_msg.edit("📤 **Sending original video with Custom Thumbnail (Zero Compression)...**")
+            await client.send_video(
+                chat_id=callback_query.message.chat.id,
+                video=downloaded_path,
+                thumb=thumb_to_use,
+                supports_streaming=True,
+                caption=f"📁 `{original_name}` (Original Video with Custom Thumbnail)"
+            )
+            await status_msg.delete()
+        else:
+            # Panda Style Compression
+            crf_val = "28"
+            scale_filter = "scale=-2:360"
+            q_label = "360p"
+            if mode == "comp_720p":
+                scale_filter = "scale=-2:720"
+                crf_val = "24"
+                q_label = "720p"
+            elif mode == "comp_1080p":
+                scale_filter = "scale=-2:1080"
+                crf_val = "21"
+                q_label = "1080p"
+
+            await status_msg.edit(f"⚙️ **Panda Compressing to {q_label} (High Clarity)...**")
+            output_file = os.path.join(ud, f"output_{user_id}_{q_label}.mp4")
+            
+            command = [
+                FFMPEG_PATH, "-i", downloaded_path,
+                "-vf", scale_filter,
+                "-c:v", "libx264", "-crf", crf_val, "-preset", "medium",
+                "-pix_fmt", "yuv420p", "-c:a", "copy",
+                "-movflags", "+faststart",
+                output_file, "-y"
+            ]
+            process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            await process.wait()
+            
+            final_output = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
+            base_name, ext = os.path.splitext(original_name)
+            new_filename = f"{base_name}_{q_label}{ext}"
+            final_path = os.path.join(ud, new_filename)
+            
+            if os.path.exists(final_path):
+                os.remove(final_path)
+            os.rename(final_output, final_path)
+            
+            await status_msg.edit(f"📤 **Sending {q_label} compressed video...**")
+            await client.send_video(
+                chat_id=callback_query.message.chat.id,
+                video=final_path,
+                thumb=thumb_to_use,
+                supports_streaming=True,
+                caption=f"📁 `{new_filename}` ({q_label} Panda Compressed)"
+            )
+            await status_msg.delete()
+
     except Exception as e:
         await status_msg.edit(f"❌ Error: `{str(e)}`")
     finally:
         if os.path.exists(ud):
             shutil.rmtree(ud)
+        if user_id in USER_VIDEOS:
+            del USER_VIDEOS[user_id]
 
+# Dub Sync & Mix Studio Processor
 @app.on_callback_query(filters.regex("process_dub_final"))
 async def process_dub_final_callback(client, callback_query):
     user_id = callback_query.from_user.id
@@ -435,7 +515,7 @@ async def process_dub_final_callback(client, callback_query):
         banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.jpg")
         thumb_path = banner_file if os.path.exists(banner_file) else None
 
-        await status_msg.edit("📤 **Uploading Final Episode...**")
+        await status_msg.edit("📤 **Uploading Final Dubbed Episode...**")
         await client.send_video(
             chat_id=callback_query.message.chat.id, video=output_final,
             thumb=thumb_path, supports_streaming=True, caption="🎬 **Final Hindi Dubbed Anime Episode**"
