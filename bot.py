@@ -9,6 +9,7 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from supabase import create_client, Client as SupabaseClient
 import imageio_ffmpeg
+from PIL import Image  # High quality image conversion ke liye
 import yt_dlp
 from datetime import datetime
 
@@ -268,7 +269,7 @@ async def back_to_menu(client, callback_query):
     
     await start_command(client, callback_query.message)
 
-# 🖼️ PHOTO OR DOCUMENT HANDLER FOR FULL HD THUMBNAIL SETUP
+# 🖼️ PHOTO OR DOCUMENT HANDLER (CONVERTS TO JPG AUTOMATICALLY FOR TELEGRAM COMPATIBILITY)
 @app.on_message((filters.photo | filters.document) & filters.private)
 async def receive_banner_media(client, message):
     user_id = message.from_user.id
@@ -277,24 +278,34 @@ async def receive_banner_media(client, message):
 
     if user_id in USER_SETTING_BANNER:
         USER_SETTING_BANNER.remove(user_id)
-        banner_path = f"banner_{user_id}.jpg"
+        raw_banner_path = f"raw_banner_{user_id}"
+        final_banner_path = f"banner_{user_id}.jpg"
         
-        if message.document:
-            if not message.document.file_name.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
-                await message.reply_text("❌ Kripya valid image file (.jpg, .png) bhejein!")
-                return
-            await message.download(file_name=banner_path)
-        else:
-            await client.download_media(message.photo.file_id, file_name=banner_path)
+        try:
+            if message.document:
+                await message.download(file_name=raw_banner_path)
+            else:
+                await client.download_media(message.photo.file_id, file_name=raw_banner_path)
             
-        USER_BANNERS[user_id] = banner_path
-        
-        await message.reply_text(
-            "✅ **Full HD Custom Thumbnail Saved Successfully!**\nAb aap jab bhi video bhejenge, yeh HD thumbnail us par attach hokar aayegi.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
-        )
+            # Convert any image (PNG, WebP, etc.) to high quality JPEG format using Pillow
+            img = Image.open(raw_banner_path)
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            img.save(final_banner_path, "JPEG", quality=95)
+            
+            if os.path.exists(raw_banner_path):
+                os.remove(raw_banner_path)
+                
+            USER_BANNERS[user_id] = final_banner_path
+            
+            await message.reply_text(
+                "✅ **Full HD Custom Thumbnail Saved Successfully!**\nAb aap jab bhi video bhejenge, yeh HD thumbnail us par properly attach hokar aayegi.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
+            )
+        except Exception as e:
+            await message.reply_text(f"❌ Thumbnail saving error: `{str(e)}`")
 
-# 🎬 VIDEO HANDLER: ZERO CONVERSION ERRORS, NATIVE THUMBNAIL ATTACHMENT
+# 🎬 VIDEO HANDLER: ZERO COMPRESSION, 100% WORKING HD THUMBNAIL ATTACHMENT
 @app.on_message((filters.video | filters.document) & filters.private)
 async def receive_video_handler(client, message):
     user_id = message.from_user.id
@@ -342,7 +353,6 @@ async def receive_video_handler(client, message):
         )
         return
 
-    # Direct Video Forwarding with Full HD Custom Thumbnail Attached (Zero Compression, Zero Errors)
     original_name = "video.mp4"
     if message.video and message.video.file_name:
         original_name = message.video.file_name
@@ -356,7 +366,9 @@ async def receive_video_handler(client, message):
     
     try:
         downloaded_path = await message.download(file_name=input_file)
-        thumb_to_use = banner_file if os.path.exists(banner_file) else None
+        
+        # Ensure thumbnail exists and is valid JPEG
+        thumb_to_use = banner_file if (banner_file and os.path.exists(banner_file)) else None
 
         await status_msg.edit("📤 **Uploading video with Full HD Thumbnail...**")
         await client.send_video(
