@@ -210,7 +210,7 @@ async def request_access_handler(client, callback_query):
     user_id = callback_query.from_user.id
     username = callback_query.from_user.username or callback_query.from_user.first_name
     await callback_query.answer("✅ Request main owner ke paas bhej di gayi hai!", show_alert=True)
-    await callback_query.message.edit_text("⏳ **Request Sent!** Owner ki approval ka intezaar karein.")
+    await callback_query.message.edit_text("⏳ **Request Sent!** Owner ki approval ka intezaار karein.")
     try:
         await client.send_message(
             chat_id=MAIN_OWNER,
@@ -298,18 +298,34 @@ async def receive_banner_media(client, message):
 
     if user_id in USER_SETTING_BANNER:
         USER_SETTING_BANNER.remove(user_id)
-        banner_path = f"banner_{user_id}.jpg"
+        raw_banner_path = os.path.abspath(f"raw_banner_{user_id}.jpg")
+        banner_path = os.path.abspath(f"banner_{user_id}.jpg")
         
         try:
             if message.document:
-                await message.download(file_name=banner_path)
+                await message.download(file_name=raw_banner_path)
             else:
-                await client.download_media(message.photo.file_id, file_name=banner_path)
-                
-            USER_BANNERS[user_id] = banner_path
+                await client.download_media(message.photo.file_id, file_name=raw_banner_path)
+            
+            # Force convert any incoming banner (PNG/JPG) to strict JPEG format without alpha channel
+            cmd_conv = [
+                FFMPEG_PATH, "-i", raw_banner_path,
+                "-vf", "scale=320:320:force_original_aspect_ratio=decrease",
+                "-pix_fmt", "yuvj420p",
+                "-q:v", "2",
+                banner_path, "-y"
+            ]
+            proc = await asyncio.create_subprocess_exec(*cmd_conv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            await proc.wait()
+
+            if os.path.exists(banner_path) and os.path.getsize(banner_path) > 0:
+                USER_BANNERS[user_id] = banner_path
+            else:
+                shutil.copy(raw_banner_path, banner_path)
+                USER_BANNERS[user_id] = banner_path
             
             await message.reply_text(
-                "✅ **Custom Cover Saved Successfully!**\nAb aap jab bhi video bhejenge, yeh thumbnail message ke upar cover par dikhegi.",
+                "✅ **Custom Cover Saved & Formatted Successfully!**\nAb aap jab bhi video bhejenge, yeh thumbnail 100% video ke upar cover par dikhegi.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")]])
             )
             return
@@ -386,7 +402,7 @@ async def handle_video_with_cover(client, message, user_id):
     try:
         downloaded_path = await message.download(file_name=input_file)
         
-        # 100% Guaranteed Re-encode to standard MP4 H.264 format so Telegram accepts external cover thumb
+        # Re-encode to standard MP4 H.264
         cmd_encode = [
             FFMPEG_PATH, "-i", downloaded_path,
             "-c:v", "libx264", "-crf", "23", "-preset", "veryfast",
@@ -405,6 +421,7 @@ async def handle_video_with_cover(client, message, user_id):
             cmd_thumb = [
                 FFMPEG_PATH, "-i", banner_file,
                 "-vf", "scale=320:320:force_original_aspect_ratio=decrease",
+                "-pix_fmt", "yuvj420p",
                 "-q:v", "3",
                 resized_thumb, "-y"
             ]
@@ -491,6 +508,7 @@ async def process_dub_final_callback(client, callback_query):
             cmd_dub_thumb = [
                 FFMPEG_PATH, "-i", banner_file,
                 "-vf", "scale=320:320:force_original_aspect_ratio=decrease",
+                "-pix_fmt", "yuvj420p",
                 "-q:v", "3",
                 resized_dub_thumb, "-y"
             ]
