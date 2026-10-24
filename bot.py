@@ -17,13 +17,12 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from supabase import create_client, Client as SupabaseClient
 import imageio_ffmpeg
-import yt_dlp
 from datetime import datetime
 
 # Credentials & Supabase Config
 API_ID = int(os.environ.get("API_ID", 38215355))
 API_HASH = os.environ.get("API_HASH", "3f095c170be8c744b8f3d7f9c75ae544")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_ACTUAL_BOT_TOKEN_HERE")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8529227386:AAGv0SmKkV749iZvwpC0J5Voo9e7Q5e_V7E")
 
 SESSION_STRING = os.environ.get("SESSION_STRING", "")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://nveowfitvoligqecxofr.supabase.co")
@@ -404,7 +403,7 @@ async def handle_incoming_video(client, message, user_id):
         ],
         [
             InlineKeyboardButton("📈 1080p (FHD Quality)", callback_data="comp_1080p"),
-            InlineKeyboardButton("🔥 Zero Compression (Sirf HD Thumbnail)", callback_data="comp_zerocompress")
+            InlineKeyboardButton("🔥 All Quality (480p + 720p + 1080p)", callback_data="comp_allquality")
         ]
     ])
 
@@ -450,21 +449,45 @@ async def quality_callback_handler(client, callback_query):
             if os.path.exists(resized_thumb) and os.path.getsize(resized_thumb) > 0:
                 thumb_to_use = resized_thumb
 
-        output_file = os.path.join(ud, f"output_{user_id}.mp4")
-
-        if mode == "comp_zerocompress":
-            status_msg = await status_msg.edit("⚡ **Instant Remuxing with HD Cover...**")
-            cmd = [
-                FFMPEG_PATH, "-i", downloaded_path,
-                "-c", "copy",
-                "-movflags", "+faststart",
-                output_file, "-y"
+        if mode == "comp_allquality":
+            qualities = [
+                ("480p", "scale=-2:480", "28"),
+                ("720p", "scale=-2:720", "24"),
+                ("1080p", "scale=-2:1080", "21")
             ]
-            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-            await proc.wait()
-            final_video = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
-            q_label = "Original"
+            for q_label, scale_filter, crf_val in qualities:
+                await status_msg.edit(f"🗜 **Compressing to {q_label} & attaching HD Cover...**")
+                output_file = os.path.join(ud, f"output_{user_id}_{q_label}.mp4")
+                cmd = [
+                    FFMPEG_PATH, "-i", downloaded_path,
+                    "-vf", scale_filter,
+                    "-c:v", "libx264", "-crf", crf_val, "-preset", "veryfast",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
+                    "-movflags", "+faststart",
+                    output_file, "-y"
+                ]
+                proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                await proc.wait()
+                final_video = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
+
+                width, height, duration = await get_video_metadata(final_video)
+                base_name, ext = os.path.splitext(original_name)
+                new_filename = f"{base_name}_{q_label}.mp4"
+
+                await status_msg.edit(f"📤 **Uploading {q_label} video with HD Cover...**")
+                await client.send_video(
+                    chat_id=callback_query.message.chat.id,
+                    video=final_video,
+                    thumb=thumb_to_use,
+                    width=width,
+                    height=height,
+                    duration=duration,
+                    supports_streaming=True,
+                    caption=f"📁 `{new_filename}` ({q_label} Compressed & HD Cover Attached)"
+                )
+            await status_msg.delete()
         else:
+            output_file = os.path.join(ud, f"output_{user_id}.mp4")
             if mode == "comp_480p":
                 scale_filter = "scale=-2:480"
                 crf_val = "28"
@@ -478,7 +501,7 @@ async def quality_callback_handler(client, callback_query):
                 crf_val = "21"
                 q_label = "1080p"
 
-            status_msg = await status_msg.edit(f"🗜 **Compressing to {q_label} & attaching HD Cover...**")
+            await status_msg.edit(f"🗜 **Compressing to {q_label} & attaching HD Cover...**")
             cmd = [
                 FFMPEG_PATH, "-i", downloaded_path,
                 "-vf", scale_filter,
@@ -491,22 +514,22 @@ async def quality_callback_handler(client, callback_query):
             await proc.wait()
             final_video = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
 
-        width, height, duration = await get_video_metadata(final_video)
-        base_name, ext = os.path.splitext(original_name)
-        new_filename = f"{base_name}_{q_label}.mp4"
+            width, height, duration = await get_video_metadata(final_video)
+            base_name, ext = os.path.splitext(original_name)
+            new_filename = f"{base_name}_{q_label}.mp4"
 
-        await status_msg.edit(f"📤 **Uploading {q_label} video with HD Cover...**")
-        await client.send_video(
-            chat_id=callback_query.message.chat.id,
-            video=final_video,
-            thumb=thumb_to_use,
-            width=width,
-            height=height,
-            duration=duration,
-            supports_streaming=True,
-            caption=f"📁 `{new_filename}` ({q_label} Compressed & HD Cover Attached)"
-        )
-        await status_msg.delete()
+            await status_msg.edit(f"📤 **Uploading {q_label} video with HD Cover...**")
+            await client.send_video(
+                chat_id=callback_query.message.chat.id,
+                video=final_video,
+                thumb=thumb_to_use,
+                width=width,
+                height=height,
+                duration=duration,
+                supports_streaming=True,
+                caption=f"📁 `{new_filename}` ({q_label} Compressed & HD Cover Attached)"
+            )
+            await status_msg.delete()
 
     except Exception as e:
         await status_msg.edit(f"❌ Error: `{str(e)}`")
@@ -605,7 +628,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
         self.send_header("Content-type", "text/plain")
         self.end_headers()
         self.wfile.write(b"Kage x Bot is active and running!")
-    def log_process(self, format, *args):
+    def log_message(self, format, *args):
         return
 
 def run_http_server():
