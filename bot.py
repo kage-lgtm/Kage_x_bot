@@ -49,6 +49,7 @@ supabase: SupabaseClient = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 USER_SETTING_BANNER = set()
 USER_BANNERS = {}
+USER_VIDEOS = {}
 WAITING_FOR_DOWNLOAD_LINK = set()
 WAITING_FOR_MAIN_EPISODE = set()
 WAITING_FOR_DUB_CLIPS = set()
@@ -142,7 +143,7 @@ async def start_command(client, message):
         photo=banner_url,
         caption=(
             f"👋 **Hello {username}!**\n\n"
-            f"Welcome to **Kage x Bot** (Lightning Fast HD Cover Attacher) 🐼🚀\n"
+            f"Welcome to **Kage x Bot** (Multi-Quality Compressor & HD Cover) 🐼🚀\n"
             f"Devloper :- @kage_x_edit\n"
             f"Join channel\nhttps://t.me/+VzwHuVRPyLjOGJl\n\n"
             f"Neeche diye gaye buttons se features explore karein:"
@@ -249,7 +250,7 @@ async def compress_menu(client, callback_query):
     if not is_authorized(callback_query.from_user.id):
         return
     await callback_query.message.edit_text(
-        "🗜 **Compressor Studio**\n\nApni video bhej do:",
+        "🗜 **Compressor Studio**\n\nApni video bhej do (Quality options milenge):",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu")]])
     )
 
@@ -283,6 +284,8 @@ async def back_to_menu(client, callback_query):
     WAITING_FOR_MAIN_EPISODE.discard(user_id)
     WAITING_FOR_DUB_CLIPS.discard(user_id)
     PROCESSING_USERS.discard(user_id)
+    if user_id in USER_VIDEOS:
+        del USER_VIDEOS[user_id]
     
     ud = get_user_dir(user_id)
     if os.path.exists(ud):
@@ -307,7 +310,6 @@ async def receive_banner_media(client, message):
             else:
                 await client.download_media(message.photo.file_id, file_name=raw_banner_path)
             
-            # High Quality Sharp Thumbnail Processing (Max clarity for Telegram cover)
             cmd_conv = [
                 FFMPEG_PATH, "-i", raw_banner_path,
                 "-vf", "scale=640:640:force_original_aspect_ratio=decrease",
@@ -338,7 +340,7 @@ async def receive_banner_media(client, message):
         if not fname.endswith(('.mp4', '.mkv', '.mov', '.webm', '.avi', '.m4v')):
             return
 
-    await handle_video_with_cover(client, message, user_id)
+    await handle_incoming_video(client, message, user_id)
 
 @app.on_message(filters.video & filters.private)
 async def receive_video_direct(client, message):
@@ -348,9 +350,9 @@ async def receive_video_direct(client, message):
         return
     if user_id in USER_SETTING_BANNER:
         return
-    await handle_video_with_cover(client, message, user_id)
+    await handle_incoming_video(client, message, user_id)
 
-async def handle_video_with_cover(client, message, user_id):
+async def handle_incoming_video(client, message, user_id):
     ud = get_user_dir(user_id)
 
     if user_id in WAITING_FOR_MAIN_EPISODE:
@@ -386,35 +388,49 @@ async def handle_video_with_cover(client, message, user_id):
         )
         return
 
-    original_name = "video.mp4"
-    if message.video and message.video.file_name:
-        original_name = message.video.file_name
-    elif message.document and message.document.file_name:
-        original_name = message.document.file_name
+    # Store video message for quality selection menu
+    USER_VIDEOS[user_id] = message
+    file_name = message.video.file_name if message.video and message.video.file_name else (message.document.file_name if message.document else "video.mp4")
 
-    status_msg = await message.reply_text("⚡ **Instant Remuxing video with HD Cover...**")
+    quality_keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📉 480p (High Compression)", callback_data="comp_480p"),
+            InlineKeyboardButton("📊 720p (Balanced HD)", callback_data="comp_720p")
+        ],
+        [
+            InlineKeyboardButton("📈 1080p (FHD Quality)", callback_data="comp_1080p"),
+            InlineKeyboardButton("🔥 Zero Compression (Sirf HD Thumbnail)", callback_data="comp_zerocompress")
+        ]
+    ])
+
+    await message.reply_text(
+        f"🎬 **Video Received!**\n📁 File: `{file_name}`\n\nApni pasand ki quality select karein:",
+        reply_markup=quality_keyboard
+    )
+
+@app.on_callback_query(filters.regex(r"^comp_"))
+async def quality_callback_handler(client, callback_query):
+    user_id = callback_query.from_user.id
+    if not is_authorized(user_id):
+        await callback_query.answer("❌ Unauthorized!", show_alert=True)
+        return
+
+    if user_id not in USER_VIDEOS:
+        await callback_query.answer("⚠ Session expired! Dobara video bhejein.", show_alert=True)
+        return
+
+    mode = callback_query.data
+    msg = USER_VIDEOS[user_id]
+    original_name = msg.video.file_name if msg.video and msg.video.file_name else (msg.document.file_name if msg.document else "video.mp4")
+    status_msg = await callback_query.message.edit_text("📥 **Downloading video...**")
     
+    ud = get_user_dir(user_id)
     input_file = os.path.join(ud, f"input_{user_id}{os.path.splitext(original_name)[1]}")
-    output_remux = os.path.join(ud, f"remux_{user_id}.mp4")
     resized_thumb = os.path.join(ud, f"thumb_{user_id}.jpg")
     banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.jpg")
     
     try:
-        downloaded_path = await message.download(file_name=input_file)
-        
-        # INSTANT REMUX: Zero re-encoding time, 100% original video quality preserved!
-        cmd_remux = [
-            FFMPEG_PATH, "-i", downloaded_path,
-            "-c", "copy",
-            "-movflags", "+faststart",
-            output_remux, "-y"
-        ]
-        proc_r = await asyncio.create_subprocess_exec(*cmd_remux, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        await proc_r.wait()
-        
-        final_video = output_remux if os.path.exists(output_remux) and os.path.getsize(output_remux) > 1024 else downloaded_path
-        width, height, duration = await get_video_metadata(final_video)
-        
+        downloaded_path = await message_download_path = await msg.download(file_name=input_file)
         thumb_to_use = None
         if banner_file and os.path.exists(banner_file):
             cmd_thumb = [
@@ -429,27 +445,72 @@ async def handle_video_with_cover(client, message, user_id):
             if os.path.exists(resized_thumb) and os.path.getsize(resized_thumb) > 0:
                 thumb_to_use = resized_thumb
 
-        base_name, _ = os.path.splitext(original_name)
-        final_filename = f"{base_name}.mp4"
+        output_file = os.path.join(ud, f"output_{user_id}.mp4")
 
-        await status_msg.edit("📤 **Uploading HD Video with Cover Thumbnail...**")
+        if mode == "comp_zerocompress":
+            status_msg = await status_msg.edit("⚡ **Instant Remuxing with HD Cover...**")
+            cmd = [
+                FFMPEG_PATH, "-i", downloaded_path,
+                "-c", "copy",
+                "-movflags", "+faststart",
+                output_file, "-y"
+            ]
+            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            await proc.wait()
+            final_video = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
+            q_label = "Original"
+        else:
+            # Resolution & Compression settings
+            if mode == "comp_480p":
+                scale_filter = "scale=-2:480"
+                crf_val = "28"
+                q_label = "480p"
+            elif mode == "comp_720p":
+                scale_filter = "scale=-2:720"
+                crf_val = "24"
+                q_label = "720p"
+            else: # comp_1080p
+                scale_filter = "scale=-2:1080"
+                crf_val = "21"
+                q_label = "1080p"
+
+            status_msg = await status_msg.edit(f"🗜 **Compressing to {q_label} (Panda Style) & attaching HD Cover...**")
+            cmd = [
+                FFMPEG_PATH, "-i", downloaded_path,
+                "-vf", scale_filter,
+                "-c:v", "libx264", "-crf", crf_val, "-preset", "veryfast",
+                "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
+                "-movflags", "+faststart",
+                output_file, "-y"
+            ]
+            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            await proc.wait()
+            final_video = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
+
+        width, height, duration = await get_video_metadata(final_video)
+        base_name, ext = os.path.splitext(original_name)
+        new_filename = f"{base_name}_{q_label}.mp4"
+
+        await status_msg.edit(f"📤 **Uploading {q_label} video with HD Cover...**")
         await client.send_video(
-            chat_id=message.chat.id,
+            chat_id=callback_query.message.chat.id,
             video=final_video,
             thumb=thumb_to_use,
             width=width,
             height=height,
             duration=duration,
             supports_streaming=True,
-            caption=f"📁 `{final_filename}` (HD Cover Attached)"
+            caption=f"📁 `{new_filename}` ({q_label} Compressed & HD Cover Attached)"
         )
         await status_msg.delete()
-        
+
     except Exception as e:
         await status_msg.edit(f"❌ Error: `{str(e)}`")
     finally:
         if os.path.exists(ud):
             shutil.rmtree(ud)
+        if user_id in USER_VIDEOS:
+            del USER_VIDEOS[user_id]
 
 @app.on_callback_query(filters.regex("process_dub_final"))
 async def process_dub_final_callback(client, callback_query):
