@@ -6,6 +6,13 @@ import shutil
 import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
+
+# Python 3.14 Event Loop Fix for Render
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from supabase import create_client, Client as SupabaseClient
@@ -598,7 +605,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
         self.send_header("Content-type", "text/plain")
         self.end_headers()
         self.wfile.write(b"Kage x Bot is active and running!")
-    def log_message(self, format, *args):
+    def log_process(self, format, *args):
         return
 
 def run_http_server():
