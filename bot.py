@@ -16,10 +16,9 @@ from datetime import datetime
 # Credentials & Supabase Config
 API_ID = int(os.environ.get("API_ID", 38215355))
 API_HASH = os.environ.get("API_HASH", "3f095c170be8c744b8f3d7f9c75ae544")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8529227386:AAFsqpj5mq4N_fRq1MJ9_hwF-hir7bVGrxw")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_ACTUAL_BOT_TOKEN_HERE")
 
-SESSION_STRING = "BQJHHrsAQohDxth8QaB1QzlGPlg2cO1cI-q5Viul5T2qLYszFLakA-2qWY0Bk21lr6dURBASZV3i98pBNIWxlCehYAAckAlk3grALwFyBq-D4cwX2jVOADnnZxcdo0GcAw4pdJdDR1Zdj4SVk8kfOvrEOtzio5fp16gbcFGVMX8tPrXPyNA4TVyg6NbWSayKzMp-pqPsywpR5Ii9OOqf4nGOE9MsZsZgXU3sOkz--DUqOT0HBkVBLFHHnmX1D_RE9PS00My9cfd0cgxszhCB7KWjT9tkpGEEM3UKgY9gksoy3behq2dcrew-negn2aY-s52ynWP1t0Xr6_MbzbcU0Y7zvg9MUAAAAAEuegsXAA"
-
+SESSION_STRING = os.environ.get("SESSION_STRING", "")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://nveowfitvoligqecxofr.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "sb_publishable_fqZzvMNKkcupSdiGMEtebA_J_UK9z9F")
 
@@ -388,7 +387,6 @@ async def handle_incoming_video(client, message, user_id):
         )
         return
 
-    # Store video message for quality selection menu
     USER_VIDEOS[user_id] = message
     file_name = message.video.file_name if message.video and message.video.file_name else (message.document.file_name if message.document else "video.mp4")
 
@@ -430,7 +428,7 @@ async def quality_callback_handler(client, callback_query):
     banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.jpg")
     
     try:
-        downloaded_path = await message_download_path = await msg.download(file_name=input_file)
+        downloaded_path = await msg.download(file_name=input_file)
         thumb_to_use = None
         if banner_file and os.path.exists(banner_file):
             cmd_thumb = [
@@ -460,7 +458,6 @@ async def quality_callback_handler(client, callback_query):
             final_video = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
             q_label = "Original"
         else:
-            # Resolution & Compression settings
             if mode == "comp_480p":
                 scale_filter = "scale=-2:480"
                 crf_val = "28"
@@ -469,12 +466,12 @@ async def quality_callback_handler(client, callback_query):
                 scale_filter = "scale=-2:720"
                 crf_val = "24"
                 q_label = "720p"
-            else: # comp_1080p
+            else:
                 scale_filter = "scale=-2:1080"
                 crf_val = "21"
                 q_label = "1080p"
 
-            status_msg = await status_msg.edit(f"🗜 **Compressing to {q_label} (Panda Style) & attaching HD Cover...**")
+            status_msg = await status_msg.edit(f"🗜 **Compressing to {q_label} & attaching HD Cover...**")
             cmd = [
                 FFMPEG_PATH, "-i", downloaded_path,
                 "-vf", scale_filter,
