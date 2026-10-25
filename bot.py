@@ -322,7 +322,7 @@ async def receive_banner_media(client, message):
                 "-q:v", "1",
                 banner_path, "-y"
             ]
-            proc = await asyncio.create_subprocess_exec(*cmd_conv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            proc = await asyncio.create_subprocess_exec(*cmd_conv, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
             await proc.wait()
 
             if os.path.exists(banner_path) and os.path.getsize(banner_path) > 0:
@@ -444,7 +444,7 @@ async def quality_callback_handler(client, callback_query):
                 "-q:v", "1",
                 resized_thumb, "-y"
             ]
-            proc_t = await asyncio.create_subprocess_exec(*cmd_thumb, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            proc_t = await asyncio.create_subprocess_exec(*cmd_thumb, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
             await proc_t.wait()
             if os.path.exists(resized_thumb) and os.path.getsize(resized_thumb) > 0:
                 thumb_to_use = resized_thumb
@@ -466,7 +466,7 @@ async def quality_callback_handler(client, callback_query):
                     "-movflags", "+faststart",
                     output_file, "-y"
                 ]
-                proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
                 await proc.wait()
                 final_video = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
 
@@ -510,7 +510,7 @@ async def quality_callback_handler(client, callback_query):
                 "-movflags", "+faststart",
                 output_file, "-y"
             ]
-            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
             await proc.wait()
             final_video = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
 
@@ -582,7 +582,7 @@ async def process_dub_final_callback(client, callback_query):
                     "-movflags", "+faststart",
                     output_final, "-y"
                 ]
-                process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
                 await process.wait()
             if not os.path.exists(output_final) or os.path.getsize(output_final) < 1024:
                 if os.path.exists(main_ep):
@@ -599,7 +599,7 @@ async def process_dub_final_callback(client, callback_query):
                 "-q:v", "1",
                 resized_dub_thumb, "-y"
             ]
-            proc = await asyncio.create_subprocess_exec(*cmd_dub_thumb, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            proc = await asyncio.create_subprocess_exec(*cmd_dub_thumb, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
             await proc.wait()
             if os.path.exists(resized_dub_thumb):
                 thumb_path = resized_dub_thumb
