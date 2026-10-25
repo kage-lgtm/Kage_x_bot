@@ -447,11 +447,12 @@ async def handle_incoming_video(client, message, user_id):
     )
 
 async def compress_video_safe(input_file, output_file, scale_filter, crf_val, status_msg, q_label):
-    await status_msg.edit_text(f"🗜 **Compressing to {q_label} (Super Fast)...** Please wait.")
+    await status_msg.edit_text(f"🗜 **Compressing to {q_label} (Optimized & Fast)...** Please wait.")
     cmd = [
         FFMPEG_PATH, "-i", input_file,
         "-vf", scale_filter,
         "-c:v", "libx264", "-crf", crf_val, "-preset", "ultrafast",
+        "-threads", "2",
         "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+faststart",
         output_file, "-y"
@@ -613,6 +614,7 @@ async def process_dub_final_callback(client, callback_query):
                     FFMPEG_PATH, *inputs, "-filter_complex", filter_complex,
                     "-map", "[outv]", "-map", "[outa]",
                     "-c:v", "libx264", "-crf", "22", "-preset", "ultrafast",
+                    "-threads", "2",
                     "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
                     "-movflags", "+faststart",
                     output_final, "-y"
