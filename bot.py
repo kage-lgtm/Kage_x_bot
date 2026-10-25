@@ -108,7 +108,6 @@ async def get_video_metadata(file_path):
     except Exception:
         return 1280, 720, 0
 
-# Progress Bar Helper Function
 async def progress_callback(current, total, message, start_time, action_text):
     now = time.time()
     diff = now - start_time
@@ -447,6 +446,49 @@ async def handle_incoming_video(client, message, user_id):
         reply_markup=quality_keyboard
     )
 
+async def compress_video_with_progress(input_file, output_file, scale_filter, crf_val, status_msg, q_label, total_duration):
+    cmd = [
+        FFMPEG_PATH, "-i", input_file,
+        "-vf", scale_filter,
+        "-c:v", "libx264", "-crf", crf_val, "-preset", "veryfast",
+        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+faststart",
+        output_file, "-y"
+    ]
+    
+    process = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+    )
+    
+    start_t = time.time()
+    while True:
+        line = await process.stdout.readline()
+        if not line:
+            break
+        decoded = line.decode("utf-8", errors="ignore")
+        if "time=" in decoded:
+            try:
+                time_str = decoded.split("time=")[1].split()[0]
+                h, m, s = time_str.split(":")
+                current_sec = int(h) * 3600 + int(m) * 60 + float(s)
+                if total_duration > 0:
+                    percent = min(100.0, current_sec * 100 / total_duration)
+                    elapsed = time.time() - start_t
+                    speed = current_sec / elapsed if elapsed > 0 else 0
+                    eta = (total_duration - current_sec) / speed if speed > 0 else 0
+                    
+                    completed = int(percent / 10)
+                    bar = "█" * completed + "░" * (10 - completed)
+                    
+                    await status_msg.edit_text(
+                        f"🗜 **Compressing to {q_label}...**\n\n"
+                        f"[{bar}] `{percent:.1f}%`\n\n"
+                        f"⏱ **Elapsed:** `{int(elapsed)}s` | **ETA:** `{int(eta)}s`"
+                    )
+            except Exception:
+                pass
+    await process.wait()
+
 @app.on_callback_query(filters.regex(r"^comp_"))
 async def quality_callback_handler(client, callback_query):
     user_id = callback_query.from_user.id
@@ -476,6 +518,8 @@ async def quality_callback_handler(client, callback_query):
             progress_args=(status_msg, start_t, "Downloading Video")
         )
         
+        _, _, duration = await get_video_metadata(input_file)
+
         thumb_to_use = None
         if banner_file and os.path.exists(banner_file):
             cmd_thumb = [
@@ -497,21 +541,11 @@ async def quality_callback_handler(client, callback_query):
                 ("1080p", "scale=-2:1080", "21")
             ]
             for q_label, scale_filter, crf_val in qualities:
-                await status_msg.edit(f"🗜 **Compressing video to {q_label} & attaching HD Cover...**")
                 output_file = os.path.join(ud, f"output_{user_id}_{q_label}.mp4")
-                cmd = [
-                    FFMPEG_PATH, "-i", input_file,
-                    "-vf", scale_filter,
-                    "-c:v", "libx264", "-crf", crf_val, "-preset", "veryfast",
-                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
-                    "-movflags", "+faststart",
-                    output_file, "-y"
-                ]
-                proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-                await proc.wait()
+                await compress_video_with_progress(input_file, output_file, scale_filter, crf_val, status_msg, q_label, duration)
                 final_video = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else input_file
 
-                width, height, duration = await get_video_metadata(final_video)
+                width, height, _ = await get_video_metadata(final_video)
                 base_name, ext = os.path.splitext(original_name)
                 new_filename = f"{base_name}_{q_label}.mp4"
 
@@ -542,20 +576,10 @@ async def quality_callback_handler(client, callback_query):
                 crf_val = "21"
                 q_label = "1080p"
 
-            await status_msg.edit(f"🗜 **Compressing video to {q_label} & attaching HD Cover...**")
-            cmd = [
-                FFMPEG_PATH, "-i", input_file,
-                "-vf", scale_filter,
-                "-c:v", "libx264", "-crf", crf_val, "-preset", "veryfast",
-                "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
-                "-movflags", "+faststart",
-                output_file, "-y"
-            ]
-            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-            await proc.wait()
+            await compress_video_with_progress(input_file, output_file, scale_filter, crf_val, status_msg, q_label, duration)
             final_video = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else input_file
 
-            width, height, duration = await get_video_metadata(final_video)
+            width, height, _ = await get_video_metadata(final_video)
             base_name, ext = os.path.splitext(original_name)
             new_filename = f"{base_name}_{q_label}.mp4"
 
