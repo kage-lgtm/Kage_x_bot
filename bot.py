@@ -108,6 +108,30 @@ async def get_video_metadata(file_path):
     except Exception:
         return 1280, 720, 0
 
+# Progress Bar Helper Function
+async def progress_callback(current, total, message, start_time, action_text):
+    now = time.time()
+    diff = now - start_time
+    if diff < 1:
+        return
+    percentage = current * 100 / total if total > 0 else 0
+    speed = current / diff if diff > 0 else 0
+    eta = (total - current) / speed if speed > 0 else 0
+    
+    completed = int(percentage / 10)
+    bar = "█" * completed + "░" * (10 - completed)
+    
+    try:
+        await message.edit_text(
+            f"⏳ **{action_text}**\n\n"
+            f"[{bar}] `{percentage:.1f}%`\n\n"
+            f"📦 **Done:** `{current / (1024*1024):.2f} MB / {total / (1024*1024):.2f} MB`\n"
+            f"🚀 **Speed:** `{speed / (1024*1024):.2f} MB/s`\n"
+            f"⏱ **ETA:** `{int(eta)} seconds`"
+        )
+    except Exception:
+        pass
+
 @app.on_message(filters.command("start") & filters.private)
 async def start_command(client, message):
     user_id = message.from_user.id
@@ -365,7 +389,12 @@ async def handle_incoming_video(client, message, user_id):
         status_msg = await message.reply_text("📥 **Downloading Main Episode...**")
         input_path = os.path.join(ud, "main_ep.mp4")
         try:
-            await message.download(file_name=input_path)
+            start_t = time.time()
+            await message.download(
+                file_name=input_path,
+                progress=progress_callback,
+                progress_args=(status_msg, start_t, "Downloading Main Episode")
+            )
             WAITING_FOR_DUB_CLIPS.add(user_id)
             await status_msg.edit(
                 "✅ **Main Episode Saved!**\n\nAb apni saari Hindi Dubbed Clips bhejiye:",
@@ -382,9 +411,15 @@ async def handle_incoming_video(client, message, user_id):
         if user_id not in WAITING_FOR_DUB_CLIPS:
             WAITING_FOR_DUB_CLIPS.add(user_id)
         clip_name = f"clip_{int(time.time() * 1000)}_{len(os.listdir(ud))}.mp4"
-        await message.download(file_name=os.path.join(ud, clip_name))
+        status_msg = await message.reply_text("📥 **Downloading Clip...**")
+        start_t = time.time()
+        await message.download(
+            file_name=os.path.join(ud, clip_name),
+            progress=progress_callback,
+            progress_args=(status_msg, start_t, "Downloading Dub Clip")
+        )
         clips_count = len([f for f in os.listdir(ud) if f.startswith("clip_")])
-        await message.reply_text(
+        await status_msg.edit(
             f"✅ **Dubbed Clip #{clips_count} Added Successfully!**",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton(f"🚀 Mix & Process ({clips_count} Clips)", callback_data="process_dub_final")],
@@ -426,7 +461,7 @@ async def quality_callback_handler(client, callback_query):
     mode = callback_query.data
     msg = USER_VIDEOS[user_id]
     original_name = msg.video.file_name if msg.video and msg.video.file_name else (msg.document.file_name if msg.document else "video.mp4")
-    status_msg = await callback_query.message.edit_text("📥 **Downloading video...**")
+    status_msg = await callback_query.message.edit_text("📥 **Preparing download...**")
     
     ud = get_user_dir(user_id)
     input_file = os.path.join(ud, f"input_{user_id}{os.path.splitext(original_name)[1]}")
@@ -434,7 +469,13 @@ async def quality_callback_handler(client, callback_query):
     banner_file = USER_BANNERS.get(user_id, f"banner_{user_id}.jpg")
     
     try:
-        downloaded_path = await msg.download(file_name=input_file)
+        start_t = time.time()
+        await msg.download(
+            file_name=input_file,
+            progress=progress_callback,
+            progress_args=(status_msg, start_t, "Downloading Video")
+        )
+        
         thumb_to_use = None
         if banner_file and os.path.exists(banner_file):
             cmd_thumb = [
@@ -456,10 +497,10 @@ async def quality_callback_handler(client, callback_query):
                 ("1080p", "scale=-2:1080", "21")
             ]
             for q_label, scale_filter, crf_val in qualities:
-                await status_msg.edit(f"🗜 **Compressing to {q_label} & attaching HD Cover...**")
+                await status_msg.edit(f"🗜 **Compressing video to {q_label} & attaching HD Cover...**")
                 output_file = os.path.join(ud, f"output_{user_id}_{q_label}.mp4")
                 cmd = [
-                    FFMPEG_PATH, "-i", downloaded_path,
+                    FFMPEG_PATH, "-i", input_file,
                     "-vf", scale_filter,
                     "-c:v", "libx264", "-crf", crf_val, "-preset", "veryfast",
                     "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
@@ -468,7 +509,7 @@ async def quality_callback_handler(client, callback_query):
                 ]
                 proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
                 await proc.wait()
-                final_video = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
+                final_video = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else input_file
 
                 width, height, duration = await get_video_metadata(final_video)
                 base_name, ext = os.path.splitext(original_name)
@@ -501,9 +542,9 @@ async def quality_callback_handler(client, callback_query):
                 crf_val = "21"
                 q_label = "1080p"
 
-            await status_msg.edit(f"🗜 **Compressing to {q_label} & attaching HD Cover...**")
+            await status_msg.edit(f"🗜 **Compressing video to {q_label} & attaching HD Cover...**")
             cmd = [
-                FFMPEG_PATH, "-i", downloaded_path,
+                FFMPEG_PATH, "-i", input_file,
                 "-vf", scale_filter,
                 "-c:v", "libx264", "-crf", crf_val, "-preset", "veryfast",
                 "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
@@ -512,7 +553,7 @@ async def quality_callback_handler(client, callback_query):
             ]
             proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
             await proc.wait()
-            final_video = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else downloaded_path
+            final_video = output_file if os.path.exists(output_file) and os.path.getsize(output_file) > 1024 else input_file
 
             width, height, duration = await get_video_metadata(final_video)
             base_name, ext = os.path.splitext(original_name)
